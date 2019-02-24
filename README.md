@@ -24,7 +24,18 @@ curl https://raw.githubusercontent.com/fishtown-analytics/dbt-bash-autocomplete/
 echo 'source ~/.dbt-completion.bash' >> ~/.bash_profile
 ```
 
+### Bash Completion
+
+In bash, the `:` character counts as a word separator, which causes this completion script to incorrectly handle selectors like `tag:...` and `source:...`. To make the script work with these characters, install the `bash-completion` program, then re-source the `dbt-completion.bash` script.
+
+**macOS**
+```
+$ brew install bash-completion
+```
+
+
 ### Notes and caveats
 
-- This script uses the manifest (assumed to be at `target/manifest.json`) to _quickly_ provide a list of existing selectors. As such, a dbt resource must be compiled before it will be available for tab completion. In the future, this script should use dbt directly to parse the project directory and generate possible selectors. Until then, brand new models/sources/tags/packages will not be displayed in the tab complete menu
-- This script was tested on macOS using bash 4.4.23. It's very likely that this script will not work as expected on other operating systems or in other shells. If you're interested in helping make this script work on another platform, please open an issue!
+This script uses the manifest (assumed to be at `target/manifest.json`) to _quickly_ provide a list of existing selectors. As such, a dbt resource must be compiled before it will be available for tab completion. In the future, this script should use dbt directly to parse the project directory and generate possible selectors. Until then, brand new models/sources/tags/packages will not be displayed in the tab complete menu.
+
+This script was tested on macOS using bash 4.4.23. It's very likely that this script will not work as expected on other operating systems or in other shells. If you're interested in helping make this script work on another platform, please open an issue!

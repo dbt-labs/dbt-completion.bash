@@ -20,7 +20,7 @@ redshift_admin_dependencies                 redshift_columns
 This script can be installed by moving it to your home directory (as a dotfile), then sourcing it in your `~/.bash_profile` file.
 
 ```
-curl https://raw.githubusercontent.com/fishtown-analytics/dbt-bash-autocomplete/master/dbt-completion.bash > ~/.dbt-completion.bash
+curl https://raw.githubusercontent.com/fishtown-analytics/dbt-completion.bash/master/dbt-completion.bash > ~/.dbt-completion.bash
 echo 'source ~/.dbt-completion.bash' >> ~/.bash_profile
 ```
 

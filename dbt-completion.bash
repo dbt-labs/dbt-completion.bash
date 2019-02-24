@@ -77,7 +77,11 @@ try:
     # The + prefix for sources is not sensible, but allowed.
     # This script shouldn't be opinionated about these things
     sources = set(
-        "{}source:{}".format(prefix, source)
+        "{}source:{}".format(prefix, node['source_name'])
+        for node in manifest['nodes'].values()
+        if node['resource_type'] == 'source'
+    ) | set(
+        "{}source:{}.{}".format(prefix, node['source_name'], node['name'])
         for node in manifest['nodes'].values()
         if node['resource_type'] == 'source'
     )
@@ -87,18 +91,19 @@ try:
     fqns = set(
         "{}{}.*".format(prefix, ".".join(node['fqn'][:i-1]))
         for node in manifest['nodes'].values()
-        for i in range(len(node['fqn']))
+        for i in range(len(node.get('fqn', [])))
         if node['resource_type'] == 'model'
     )
 
     selectors = [
         selector
         for selector in (models | tags | sources | fqns)
-        if selector and selector != ''
+        if selector != ''
     ]
 
     print("\n".join(selectors))
 except Exception as e:
+    print(e)
     # oops!
     pass
 EOF
@@ -170,6 +175,12 @@ _get_project_root() {
 
 # Core bash completion logic
 _complete_it() {
+    # Requires bash-completion, used to handle ':' chars in args
+    if [[ $(type -t _get_comp_words_by_ref) == 'function' ]] ; then
+        local cur
+        _get_comp_words_by_ref -n : cur
+    fi
+
     # Find the first present flag to the left of the cursor, then
     # determine if the flag operates as a node selector
     last_flag=$(_get_last_flag $COMP_CWORD "${COMP_WORDS[@]}")
@@ -195,6 +206,11 @@ _complete_it() {
             COMPREPLY=($(compgen -W "$selectors" ""))
         else
             COMPREPLY=($(compgen -W "$selectors" "$current_arg"))
+        fi
+
+        # Requires bash-completion, used to handle ':' chars in args
+        if [[ $(type -t __ltrim_colon_completions ) == 'function' ]] ; then
+            __ltrim_colon_completions "$cur"
         fi
     fi
 }

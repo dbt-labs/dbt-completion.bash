@@ -4,14 +4,41 @@ _parse_manifest() {
 manifest_path=$1
 prefix=$2
 prog=$(cat <<EOF
-import fileinput, json, sys
-prefix = sys.argv.pop() if len(sys.argv) == 2 else ""
-manifest = json.loads("\n".join([line for line in fileinput.input()]))
-print("\n".join([
-    "{}{}".format(prefix, node['name'])
-    for node in manifest['nodes'].values()
-    if node['resource_type'] == 'model'
-        ]))
+try:
+    import fileinput, json, sys
+    prefix = sys.argv.pop() if len(sys.argv) == 2 else ""
+
+    manifest = json.loads("\n".join([line for line in fileinput.input()]))
+    models = set(
+        "{}{}".format(prefix, node['name'])
+        for node in manifest['nodes'].values()
+        if node['resource_type'] in ['model', 'seed']
+    )
+    tags = set(
+        "{}tag:{}".format(prefix, tag)
+        for node in manifest['nodes'].values()
+        for tag in node.get('tags', [])
+        if node['resource_type'] == 'model'
+    )
+    sources = set(
+        "{}source:{}".format(prefix, source)
+        for node in manifest['nodes'].values()
+        if node['resource_type'] == 'source'
+    )
+    fqns = set(
+        "{}{}.*".format(prefix, ".".join(node['fqn'][:i-1]))
+        for node in manifest['nodes'].values()
+        for i in range(len(node['fqn']))
+        if node['resource_type'] == 'model'
+    )
+    selectors = [
+        selector
+        for selector in (models | tags | sources | fqns)
+        if selector and selector != ''
+    ]
+    print("\n".join(selectors))
+except:
+    pass
 EOF
 )
 
@@ -62,13 +89,25 @@ _get_arg_prefix() {
     fi
 }
 
+_get_project_root() {
+  slashes=${PWD//[^\/]/}
+  directory="$PWD"
+  for (( n=${#slashes}; n>0; --n ))
+  do
+    test -e "$directory/dbt_project.yml" && echo "$directory/dbt_project.yml" && return
+    directory="$directory/.."
+  done
+}
+
 _complete_it() {
     last_flag=$(_get_last_flag $COMP_CWORD "${COMP_WORDS[@]}")
     is_selector=$(_flag_is_selector $last_flag)
     if [[ $is_selector == 0 ]] ; then
         current_arg="${COMP_WORDS[$COMP_CWORD]}"
         prefix=$(_get_arg_prefix $current_arg)
-        manifest_path=manifest.json
+        project_file=$(_get_project_root)
+        project_dir=$(dirname $project_file)
+        manifest_path="${project_dir}/target/manifest.json"
         models=$(_parse_manifest $manifest_path $prefix)
         if [[ $current_arg == -* ]]; then
             COMPREPLY=($(compgen -W "$models" ""))

@@ -215,4 +215,4 @@ _complete_it() {
     fi
 }
 
-complete -F _complete_it dbt
+complete -o nospace -F _complete_it dbt

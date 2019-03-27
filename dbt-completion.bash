@@ -173,10 +173,11 @@ _get_project_root() {
   done
 }
 
+
 # Core bash completion logic
 _complete_it() {
     # Requires bash-completion, used to handle ':' chars in args
-    if [[ $(type _get_comp_words_by_ref) =~ 'function' ]] ; then
+    if [[ -n "$BASH" ]] && [[ $(type -t _get_comp_words_by_ref) == 'function' ]]; then
         local cur
         _get_comp_words_by_ref -n : cur
     fi
@@ -209,7 +210,7 @@ _complete_it() {
         fi
 
         # Requires bash-completion, used to handle ':' chars in args
-        if [[ $(type __ltrim_colon_completions ) =~ 'function' ]] ; then
+        if [[ -n "$BASH" ]] && [[ $(type -t __ltrim_colon_completions ) == 'function' ]] ; then
             __ltrim_colon_completions "$cur"
         fi
     fi

@@ -121,7 +121,7 @@ _get_last_flag() {
     arg_list=("$@")
 
     first_flag=""
-    for i in $(seq $arg_index 0); do
+    for i in $(seq $arg_index -1 0); do
         arg=${arg_list[$i]}
         if [[ $arg == -* ]] ; then
             first_flag=$arg

@@ -109,7 +109,7 @@ except Exception as e:
 EOF
 )
 
-cat $manifest_path | python -c "$prog" $prefix
+cat "$manifest_path" | python -c "$prog" $prefix
 }
 
 # Iterate backwards in the arg list from the index
@@ -194,11 +194,11 @@ _complete_it() {
         manifest_path="${project_dir}/target/manifest.json"
 
         # Bail out if we can't find a manifest
-        if [ ! -f $manifest_path ] ; then
+        if [ ! -f "$manifest_path" ] ; then
             return
         fi
 
-        selectors=$(_parse_manifest $manifest_path $prefix)
+        selectors=$(_parse_manifest "$manifest_path" $prefix)
 
         # If the cursor is in the middle of a flag, don't try to tab complete
         # it. This would lead to errors with compgen. Otherwise, supply the

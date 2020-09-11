@@ -46,7 +46,7 @@ If using oh-my-zsh, the atutocompletion script can be installed by putting the `
 
 If installing manually, instructions from [zsh-completions](https://github.com/zsh-users/zsh-completions) mention that you need to include the directory where `_dbt` is stored in your `$fpath` by adding the following to `~/.zshrc`
 ```
-fpath=(path/to/_dbt/parent_direcotry $fpath)
+fpath=(path/to/_dbt/parent_directory $fpath)
 ```
 And you may need to rebuild the zsh completion cache by running this in your terminal:
 ```

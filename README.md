@@ -24,7 +24,7 @@ curl https://raw.githubusercontent.com/fishtown-analytics/dbt-completion.bash/ma
 echo 'source ~/.dbt-completion.bash' >> ~/.bash_profile
 ```
 
-### Installation (zsh)
+### Installation (bash script on zsh)
 The z shell requires a bit more work, you'll also want to automatically load `compinit` and `bashcompinit` if they are not already loaded.
 
 This makes use of zsh's ability to import bash completion scripts and use them, as long as they're script-compatible.
@@ -34,6 +34,23 @@ curl https://raw.githubusercontent.com/fishtown-analytics/dbt-completion.bash/ma
 echo 'autoload -U +X compinit && compinit' >> ~/.zshrc
 echo 'autoload -U +X bashcompinit && bashcompinit' >> ~/.zshrc
 echo 'source ~/.dbt-completion.bash' >> ~/.zshrc
+```
+
+### Installation (zsh script)
+
+#### Using oh-my-zsh
+
+If using oh-my-zsh, the atutocompletion script can be installed by putting the `_dbt` file in the folder `~/.oh-my-zsh/completions/` (create the completions folder if it doesn't exist).
+
+#### Manual installation
+
+If installing manually, instructions from [zsh-completions](https://github.com/zsh-users/zsh-completions) mention that you need to include the directory where `_dbt` is stored in your `$fpath` by adding the following to `~/.zshrc`
+```
+fpath=(path/to/_dbt/parent_directory $fpath)
+```
+And you may need to rebuild the zsh completion cache by running this in your terminal:
+```
+rm -f ~/.zcompdump; compinit
 ```
 
 ### Bash Completion

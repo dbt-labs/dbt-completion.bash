@@ -1,0 +1,322 @@
+#compdef dbt
+
+# OVERVIEW
+#   Adds autocompletion to dbt CLI by:
+#       1. Finding the root of the repo (identified by dbt_project.yml
+#       2. Parsing target/manifest.json file, extracting valid model selectors
+#       3. Doing some bash magic to autocomplete selectors for:
+#           -m
+#           --model[s]
+#           --exclude
+#
+# NOTE: This script uses the manifest (assumed to be at target/manifest.json)
+#       to _quickly_ provide a list of existing selectors. As such, a dbt
+#       resource must be compiled before it will be available for tab completion.
+#       In the future, this script should use dbt directly to parse the project
+#       directory and generate possible selectors. Until then, brand new
+#       models/sources/tags/packages will not be displayed in the tab complete menu
+#
+#
+# CREDITS
+#   Leveraging a lot of logic from dbt-completion.bash:
+#   https://github.com/fishtown-analytics/dbt-completion.bash/blob/master/dbt-completion.bash
+#
+#  Inspired by zsh-completions
+#  https://github.com/zsh-users/zsh-completions
+#  and particularly https://github.com/zsh-users/zsh-completions/blob/40c6c768eabfa49d54a149149f338e23ee6dd83b/src/_ufw
+
+
+
+# Inline a python script so we can deploy this as a single file
+# the idea of doing this in bash natively is... daunting
+_parse_manifest() {
+manifest_path=$1
+prefix=$2
+prog=$(cat <<EOF
+# Use a big try/catch so any errors (maybe from a corrupted or
+# missing manifest?) are not printed on tab-complete
+
+try:
+    import fileinput, json, sys
+
+    # If a prefix is given as an argument, include it in the
+    # generated selector list. The bash completion logic below
+    # will match these generated selectors against partially
+    # written args when table completed. This helps the script
+    # match selectors when a user does something like:
+    #   dbt run --models +order<tab>
+
+    prefix = sys.argv.pop() if len(sys.argv) == 2 else ""
+
+    manifest = json.loads("\n".join([line for line in fileinput.input()]))
+
+    models = set(
+        "{}{}".format(prefix, node['name'])
+        for node in manifest['nodes'].values()
+        if node['resource_type'] in ['model', 'seed']
+    )
+
+    tags = set(
+        "{}tag:{}".format(prefix, tag)
+        for node in manifest['nodes'].values()
+        for tag in node.get('tags', [])
+        if node['resource_type'] == 'model'
+    )
+
+    # The + prefix for sources is not sensible, but allowed.
+    # This script shouldn't be opinionated about these things
+    sources = set(
+        "{}source:{}".format(prefix, node['source_name'])
+        for node in manifest['nodes'].values()
+        if node['resource_type'] == 'source'
+    ) | set(
+        "{}source:{}.{}".format(prefix, node['source_name'], node['name'])
+        for node in manifest['nodes'].values()
+        if node['resource_type'] == 'source'
+    )
+
+    # Generate partial Fully Qualified Names with a wildcard
+    # suffix. This matches things like directories and packag names
+    fqns = set(
+        "{}{}.*".format(prefix, ".".join(node['fqn'][:i-1]))
+        for node in manifest['nodes'].values()
+        for i in range(len(node.get('fqn', [])))
+        if node['resource_type'] == 'model'
+    )
+
+    selectors = [
+        selector.replace(':', '\:')
+        for selector in (models | tags | sources | fqns)
+        if selector != ''
+    ]
+
+    selectorsplus = []
+    selectorsat = []
+    # selectorsplus = ['+' + selector for selector in selectors ]
+    # selectorsat = ['@' + selector for selector in selectors ]
+
+    print(" ".join(selectors + selectorsplus + selectorsat))
+except Exception as e:
+    print(e)
+    # oops!
+    pass
+EOF
+)
+
+cat "$manifest_path" | python -c "$prog" $prefix
+}
+
+
+# Iterate backwards in the arg list from the index
+# and return the first flag that we find (ie. an
+# argument that begins with a '-'
+_get_last_flag() {
+    arg_index=$1
+    shift
+
+    first_flag=""
+    for i in $(seq $arg_index -1 0); do
+        # arg=$words[$i]
+        if [[ $words[$i] == -* ]] ; then
+            first_flag=$arg
+            break
+        fi
+    done
+
+    echo $first_flag
+}
+
+
+# Return 0 if the supplied flag accepts a selector as an argument
+# or 1 if it does not. Python's argparse supports flag prefixes
+# so, this method matches both --model and --models. Probably not
+# appropriate to support prefixes of exclude, for instance
+_flag_is_selector() {
+    flag=$1
+
+    if [[ $flag == '-m' ]] || \
+       [[ $flag == --model* ]] || \
+       [[ $flag ==  '--exclude' ]] ;
+    then
+        echo 0
+    else
+        echo 1
+    fi
+}
+
+
+# Walk up the filesystem until we find a dbt_project.yml file,
+# then return the path which contains it (if found)
+_get_project_root() {
+  slashes=${PWD//[^\/]/}
+  directory="$PWD"
+  for (( n=${#slashes}; n>0; --n ))
+  do
+    test -e "$directory/dbt_project.yml" && echo "$directory" && return
+    directory="$directory/.."
+  done
+}
+
+
+# Lists the difference models, extracted from manifest.json
+_dbt_list_models() {
+
+    # Wanted to look at $words to know when or not to suggest models, 
+    # but the issue is that $words seems to reset after the first argument has been typed
+
+
+    # Option 1 to try to capture if the last flag is for a model (does not work because $words resets)
+    # if [ $(($words[(I)--model] + $words[(I)-m])) != $words[(I)-*] ] || [ $words[(I)-*] = 0 ]
+    # then
+    #     return
+    # fi
+
+    # Option 2 to try to capture if the last flag is for a model  (does not work because $words resets)
+    # last_flag=$(_get_last_flag ${#words} $words)
+    # is_selector=$(_flag_is_selector $last_flag)
+    #
+    # if [[ $is_selector == 0 ]] ; then
+    #     return
+    # fi
+
+    project_dir="$(_get_project_root)"
+    manifest_path="${project_dir}/target/manifest.json"
+
+    if [ ! -f "$manifest_path" ] ; then
+        return
+    fi
+
+    local first_letter
+    first_letter=${words[-1]:0:1}
+
+    if [ "$first_letter" = "+" ] || [ "$first_letter" = "@" ]; then
+        local models_list=( $(_parse_manifest "$manifest_path" "$first_letter") )
+    else
+        local models_list=( $(_parse_manifest "$manifest_path" "") )
+    fi
+    _values -s , 'models' $models_list
+}
+
+
+
+# Provides sub-commands and arguments for dbt docs
+_dbt_docs() {
+
+    action=(
+      "generate"
+      "serve"
+    )
+
+    _describe -t action 'action' action
+
+    _arguments -C -s -S -n \
+        $profile_args \
+        '(- 1 *)'{-h,--help}"[show the help message and exit]"  \
+        '(-t --target)'{-t,--target}"[which target to load for the given profile]"  \
+        --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
+        --bypass-cache"[if set, bypass the adapter-level cache of database state]" \
+        --no-compile"[Do not run \"dbt compile\" as part of docs generation"
+}
+
+# Provides arguments for dbt test
+_dbt_test() {
+
+    _arguments -C -s -S -n \
+        $common_test_run_args \
+        $profile_args \
+        --data"[run data tests defined in 'tests' directory]" \
+        --schema:"[run constraint validations from schema.yml files]" \
+        '*:: :_dbt_list_models'
+}
+
+# Provides arguments for dbt run
+_dbt_run() {
+
+    _arguments -C -s -S -n \
+        $common_test_run_args \
+        $profile_args \
+        --full-refresh"[perform full-refresh]" \
+        '*:: :_dbt_list_models'
+}
+
+# Main function
+# Contains the global actions and flags
+_dbt() {
+    
+    local -a state commands common_test_run_args profile_args
+
+    profile_args=(
+        --profile"[which profile to load]:profile:_files" \
+        --profiles-dir"[which directory to look in for the profiles.yml file]:profile:_files" \
+        --project-dir"[Which directory to look in for the dbt_project.yml file]:dir:_files" \
+    )
+
+    common_test_run_args=(
+        '(- 1 *)'{-h,--help}"[show the help message and exit]"  \
+        '(-m --model)'{-m,--model}"[specify the models to include]:models:_dbt_list_models"  \
+        '(--exclude)'--exclude"[specify models to exclude]:models:_dbt_list_models"  \
+        --full-refresh"[perform full-refresh]" \
+        '(-d --debug)'{-d,--debug}"[debug mode]" \
+        '(-t --target)'{-t,--target}"[which target to load for the given profile]"  \
+        '(-x --fail-fast)'{-x,--fail-fast}"[stop execution upon a first test failure]"  \
+        --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
+        --bypass-cache"[if set, bypass the adapter-level cache of database state]" \
+        --threads"[specify number of threads to use while executing models]:threads:=THREADS" \
+    )
+
+    commands=(
+      "run:run SQL transformation"
+      "test:runs tests on data in deployed model"
+      "seed:load csv seeds"
+      "docs:generate and serve docs"
+      "compile:generates executable sql - written to the target/ directory"
+      "clean:delete all folders in the clean-targets list"
+      "debug:show some helpful information about dbt for debugging"
+      "list (ls):list the resources in your project"
+      "snapshot:execute snapshots defined in your project"
+      "rpc:start a json-rpc server"
+      "run-operation:run the named macro with any supplied arguments"
+      "deps:pull the most recent version of the dependencies listed in packages.yml"
+    )
+
+    _arguments -C -s -S -n \
+        '(- 1 *)'--version"[Show version information]: :->full" \
+        '(- 1 *)'{-h,--help}'[show the help message and exit]: :->full' \
+        '(-d --debug)'{-d,--debug}"[display debug logging during dbt execution]" \
+        '(--log-format)'--log-format"[specify the log forma]:log format:(text json default)" \
+        '(-S --strict)'{-S,--strict}'[run schema validations at runtime]: :->full' \
+        --warn-error'[display usage information]: :->full' \
+        --partial-parse'[allow for partial parsing by looking for and writing to a pickle file in the target directory]: :->full' \
+        '1:cmd:->cmds' \
+        '*:: :->args' && ret=0
+
+    case "$state" in
+      (cmds)
+          _describe -t commands 'commands' commands
+      ;;
+      (args)
+         local cmd
+         cmd=$words[1]
+         case "$cmd" in
+             (run)
+                 _dbt_run && ret=0
+             ;;
+             (test)
+                 _dbt_test && ret=0
+             ;;
+             (docs)
+                 _dbt_docs && ret=0
+             ;;
+             (*)
+                 _default && ret=0
+             ;;
+         esac
+      ;;
+      (*)
+      ;;
+    esac
+
+    return ret
+}
+
+_dbt

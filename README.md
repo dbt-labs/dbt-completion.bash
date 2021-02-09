@@ -52,6 +52,7 @@ And you may need to rebuild the zsh completion cache by running this in your ter
 ```
 rm -f ~/.zcompdump; compinit
 ```
+In many Linux distributions, the `zsh` package includes `/usr/local/share/zsh/site-functions` in its `fpath`, so simply copying `_dbt` in that directory should work.
 
 ### Bash Completion
 

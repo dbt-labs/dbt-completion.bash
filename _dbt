@@ -7,6 +7,8 @@
 #       3. Doing some bash magic to autocomplete selectors for:
 #           -m
 #           --model[s]
+#           -s 
+#           --select
 #           --exclude
 #
 # NOTE: This script uses the manifest (assumed to be at target/manifest.json)

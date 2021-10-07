@@ -141,6 +141,8 @@ _flag_is_selector() {
 
     if [[ $flag == '-m' ]] || \
        [[ $flag == --model* ]] || \
+       [[ $flag == '-s' ]] || \
+       [[ $flag == '--select' ]] || \
        [[ $flag ==  '--exclude' ]] ;
     then
         echo 0

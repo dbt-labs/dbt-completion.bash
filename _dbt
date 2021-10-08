@@ -219,7 +219,7 @@ _dbt_docs() {
         '(-t --target)'{-t,--target}"[which target to load for the given profile]"  \
         --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
         --bypass-cache"[if set, bypass the adapter-level cache of database state]" \
-        --no-compile"[Do not run \"dbt compile\" as part of docs generation"
+        --no-compile"[Do not run \"dbt compile\" as part of docs generation]"
 }
 
 # Provides arguments for dbt test

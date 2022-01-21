@@ -109,46 +109,6 @@ cat "$manifest_path" | python -c "$prog" $prefix
 }
 
 
-# Iterate backwards in the arg list from the index
-# and return the first flag that we find (ie. an
-# argument that begins with a '-'
-_get_last_flag() {
-    arg_index=$1
-    shift
-
-    first_flag=""
-    for i in $(seq $arg_index -1 0); do
-        # arg=$words[$i]
-        if [[ $words[$i] == -* ]] ; then
-            first_flag=$arg
-            break
-        fi
-    done
-
-    echo $first_flag
-}
-
-
-# Return 0 if the supplied flag accepts a selector as an argument
-# or 1 if it does not. Python's argparse supports flag prefixes
-# so, this method matches both --model and --models. Probably not
-# appropriate to support prefixes of exclude, for instance
-_flag_is_selector() {
-    flag=$1
-
-    if [[ $flag == '-m' ]] || \
-       [[ $flag == --model* ]] || \
-       [[ $flag == '-s' ]] || \
-       [[ $flag == '--select' ]] || \
-       [[ $flag ==  '--exclude' ]] ;
-    then
-        echo 0
-    else
-        echo 1
-    fi
-}
-
-
 # Walk up the filesystem until we find a dbt_project.yml file,
 # then return the path which contains it (if found)
 _get_project_root() {
@@ -216,20 +176,29 @@ _dbt_docs() {
     _arguments -C -s -S -n \
         $profile_args \
         '(- 1 *)'{-h,--help}"[show the help message and exit]"  \
-        '(-t --target)'{-t,--target}"[which target to load for the given profile]"  \
+        '(-t --target)'{-t,--target}"[which target to load for the given profile]:()"  \
         --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
-        --bypass-cache"[if set, bypass the adapter-level cache of database state]" \
         --no-compile"[Do not run \"dbt compile\" as part of docs generation"
+}
+
+# Provides arguments for dbt build
+_dbt_build() {
+
+    _arguments -C -s -S -n \
+        $common_test_run_build_args \
+        $profile_args \
+        --full-refresh"[perform full-refresh]" \
+        --resource-type"[type of resources to select]:res:(model snapshot test seed all)" \
+        '*:: :_dbt_list_models'
 }
 
 # Provides arguments for dbt test
 _dbt_test() {
 
     _arguments -C -s -S -n \
-        $common_test_run_args \
+        $common_test_run_build_args \
         $profile_args \
-        --data"[run data tests defined in 'tests' directory]" \
-        --schema:"[run constraint validations from schema.yml files]" \
+        '(-m --model)'{-m,--model}"[specify the models to include]:models:_dbt_list_models"  \
         '*:: :_dbt_list_models'
 }
 
@@ -237,38 +206,54 @@ _dbt_test() {
 _dbt_run() {
 
     _arguments -C -s -S -n \
-        $common_test_run_args \
+        $common_test_run_build_args \
         $profile_args \
         --full-refresh"[perform full-refresh]" \
+        '(-m --model)'{-m,--model}"[specify the models to include]:models:_dbt_list_models"  \
         '*:: :_dbt_list_models'
 }
+
+# Provides arguments for dbt ls / list
+_dbt_list() {
+
+    _arguments -C -s -S -n \
+        $profile_args \
+        --resource-type"[type of resources to select]:res:(exposure snapshot metric analysis model source seed test default all)" \
+        --output"[format of the output]:outp:(json name path selector)" \
+        --output-keys"[if --output json, this flag controls which node properties are included in the output]:()" \
+}
+
 
 # Main function
 # Contains the global actions and flags
 _dbt() {
     
-    local -a state commands common_test_run_args profile_args
+    local -a state commands common_test_run_build_args profile_args
 
     profile_args=(
         --profile"[which profile to load]:profile:_files" \
         --profiles-dir"[which directory to look in for the profiles.yml file]:profile:_files" \
-        --project-dir"[Which directory to look in for the dbt_project.yml file]:dir:_files" \
+        --project-dir"[which directory to look in for the dbt_project.yml file]:dir:_files" \
     )
 
-    common_test_run_args=(
+    common_test_run_build_args=(
         '(- 1 *)'{-h,--help}"[show the help message and exit]"  \
-        '(-m --model)'{-m,--model}"[specify the models to include]:models:_dbt_list_models"  \
+        '(-s --select)'{-s,--select}"[specify the nodes to include]:models:_dbt_list_models"  \
         '(--exclude)'--exclude"[specify models to exclude]:models:_dbt_list_models"  \
-        --full-refresh"[perform full-refresh]" \
-        '(-d --debug)'{-d,--debug}"[debug mode]" \
-        '(-t --target)'{-t,--target}"[which target to load for the given profile]"  \
+        '(-t --target)'{-t,--target}"[which target to load for the given profile]:()"  \
         '(-x --fail-fast)'{-x,--fail-fast}"[stop execution upon a first test failure]"  \
         --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
-        --bypass-cache"[if set, bypass the adapter-level cache of database state]" \
-        --threads"[specify number of threads to use while executing models]:threads:=THREADS" \
+        --threads"[specify number of threads to use while executing models]:()" \
+        --selector"[the selector name to use, as defined in selectors.yml]:selector_file:_files" \
+        --state"[if set, use the given directory as the source for json files to compare with this project.]:state:_files" \
+        --defer"[If set, defer to the state variable for resolving unselected nodes.]" \
+        --no-defer"[if set, do not defer to the state variable for resolving unselected nodes.]" \
+        --store-failures"[store test results (failing rows) in the database]" \
+        --indirect-selection"[select all tests that are adjacent to selected resources, even if they those resources have been explicitly selected.]:opts:(eager cautious)" \
     )
 
     commands=(
+      "build:run all Seeds, Models, Snapshots, and tests in DAG order"
       "run:run SQL transformation"
       "test:runs tests on data in deployed model"
       "seed:load csv seeds"
@@ -276,11 +261,12 @@ _dbt() {
       "compile:generates executable sql - written to the target/ directory"
       "clean:delete all folders in the clean-targets list"
       "debug:show some helpful information about dbt for debugging"
-      "list (ls):list the resources in your project"
+      "ls:list the resources in your project"
       "snapshot:execute snapshots defined in your project"
-      "rpc:start a json-rpc server"
       "run-operation:run the named macro with any supplied arguments"
       "deps:pull the most recent version of the dependencies listed in packages.yml"
+      "parse:parse the project and provides information on performance"
+      "source:manage your project's sources"
     )
 
     _arguments -C -s -S -n \
@@ -288,9 +274,9 @@ _dbt() {
         '(- 1 *)'{-h,--help}'[show the help message and exit]: :->full' \
         '(-d --debug)'{-d,--debug}"[display debug logging during dbt execution]" \
         '(--log-format)'--log-format"[specify the log forma]:log format:(text json default)" \
-        '(-S --strict)'{-S,--strict}'[run schema validations at runtime]: :->full' \
-        --warn-error'[display usage information]: :->full' \
-        --partial-parse'[allow for partial parsing by looking for and writing to a pickle file in the target directory]: :->full' \
+        --warn-error'[display usage information]' \
+        --partial-parse'[allow for partial parsing by looking for and writing to a pickle file in the target directory]' \
+        --no-version-check"[If set, skip ensuring dbt's version matches the one specified in the dbt_project.ym]" \
         '1:cmd:->cmds' \
         '*:: :->args' && ret=0
 
@@ -302,6 +288,9 @@ _dbt() {
          local cmd
          cmd=$words[1]
          case "$cmd" in
+             (build)
+                 _dbt_build && ret=0
+             ;;
              (run)
                  _dbt_run && ret=0
              ;;
@@ -310,6 +299,12 @@ _dbt() {
              ;;
              (docs)
                  _dbt_docs && ret=0
+             ;;
+             (list)
+                 _dbt_list && ret=0
+             ;;
+             (ls)
+                 _dbt_list && ret=0
              ;;
              (*)
                  _default && ret=0

@@ -178,7 +178,7 @@ _dbt_docs() {
         '(- 1 *)'{-h,--help}"[show the help message and exit]"  \
         '(-t --target)'{-t,--target}"[which target to load for the given profile]:()"  \
         --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
-        --no-compile"[Do not run \"dbt compile\" as part of docs generation"
+        --no-compile"[Do not run \"dbt compile\" as part of docs generation]"
 }
 
 # Provides arguments for dbt build

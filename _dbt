@@ -69,12 +69,24 @@ try:
     # This script shouldn't be opinionated about these things
     sources = set(
         "{}source:{}".format(prefix, node['source_name'])
-        for node in manifest['nodes'].values()
+        for node in manifest['sources'].values()
         if node['resource_type'] == 'source'
     ) | set(
         "{}source:{}.{}".format(prefix, node['source_name'], node['name'])
-        for node in manifest['nodes'].values()
+        for node in manifest['sources'].values()
         if node['resource_type'] == 'source'
+    )
+
+    exposures = set(
+        "{}exposure:{}".format(prefix, node['name'])
+        for node in manifest['exposures'].values()
+        if node['resource_type'] == 'exposure'
+    )
+
+    metrics = set(
+        "{}metric:{}".format(prefix, node['name'])
+        for node in manifest['metrics'].values()
+        if node['resource_type'] == 'metric'
     )
 
     # Generate partial Fully Qualified Names with a wildcard
@@ -86,18 +98,24 @@ try:
         if node['resource_type'] == 'model'
     )
 
+    hard_coded = {
+        "{}config.materialized:view".format(prefix),
+        "{}config.materialized:table".format(prefix),
+        "{}config.materialized:incremental".format(prefix),
+        "{}config.materialized:snapshot".format(prefix),
+        "{}state:new".format(prefix),
+        "{}state:modified".format(prefix),
+        "{}result:error".format(prefix),
+        "{}result:fail".format(prefix)
+    }
+
     selectors = [
         selector.replace(':', '\:')
-        for selector in (models | tags | sources | fqns)
+        for selector in (models | tags | sources | exposures | metrics | fqns | hard_coded)
         if selector != ''
     ]
 
-    selectorsplus = []
-    selectorsat = []
-    # selectorsplus = ['+' + selector for selector in selectors ]
-    # selectorsat = ['@' + selector for selector in selectors ]
-
-    print(" ".join(selectors + selectorsplus + selectorsat))
+    print(" ".join(selectors))
 except Exception as e:
     print(e)
     # oops!
@@ -106,6 +124,39 @@ EOF
 )
 
 cat "$manifest_path" | python -c "$prog" $prefix
+}
+
+
+_parse_selectors() {
+manifest_path=$1
+prog=$(cat <<EOF
+# Use a big try/catch so any errors (maybe from a corrupted or
+# missing manifest?) are not printed on tab-complete
+
+try:
+    import fileinput, json, sys
+
+    # No prefix is allowed for YAML selectors
+
+    manifest = json.loads("\n".join([line for line in fileinput.input()]))
+
+    selectors = set(
+        "{}".format(node['name'])
+        for node in manifest['selectors'].values()
+    )
+
+    if selectors:
+        print(" ".join(selectors))
+    else:
+        print("")
+except Exception as e:
+    print(e)
+    # oops!
+    pass
+EOF
+)
+
+cat "$manifest_path" | python -c "$prog"
 }
 
 
@@ -161,6 +212,22 @@ _dbt_list_models() {
     _values -s , 'models' $models_list
 }
 
+
+# Lists the different selectors, extracted from manifest.json
+_dbt_list_selectors() {
+
+    project_dir="$(_get_project_root)"
+    manifest_path="${project_dir}/target/manifest.json"
+
+    if [ ! -f "$manifest_path" ] ; then
+        return
+    fi
+
+    local selectors_list=( $(_parse_selectors "$manifest_path") )
+    if [ "$selectors_list" != "" ]; then
+        _values -s , 'selectors' $selectors_list
+    fi
+}
 
 
 # Provides sub-commands and arguments for dbt docs
@@ -218,9 +285,13 @@ _dbt_list() {
 
     _arguments -C -s -S -n \
         $profile_args \
+        '(-s --select)'{-s,--select}"[specify the nodes to include]:models:_dbt_list_models"  \
+        '(--exclude)'--exclude"[specify models to exclude]:models:_dbt_list_models"  \
+        --selector"[the selector name to use, as defined in selectors.yml]:selectors:_dbt_list_selectors" \
         --resource-type"[type of resources to select]:res:(exposure snapshot metric analysis model source seed test default all)" \
         --output"[format of the output]:outp:(json name path selector)" \
         --output-keys"[if --output json, this flag controls which node properties are included in the output]:()" \
+        
 }
 
 
@@ -244,7 +315,7 @@ _dbt() {
         '(-x --fail-fast)'{-x,--fail-fast}"[stop execution upon a first test failure]"  \
         --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
         --threads"[specify number of threads to use while executing models]:()" \
-        --selector"[the selector name to use, as defined in selectors.yml]:selector_file:_files" \
+        --selector"[the selector name to use, as defined in selectors.yml]:selectors:_dbt_list_selectors" \
         --state"[if set, use the given directory as the source for json files to compare with this project.]:state:_files" \
         --defer"[If set, defer to the state variable for resolving unselected nodes.]" \
         --no-defer"[if set, do not defer to the state variable for resolving unselected nodes.]" \

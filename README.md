@@ -40,7 +40,7 @@ echo 'source ~/.dbt-completion.bash' >> ~/.zshrc
 
 #### Using oh-my-zsh
 
-If using oh-my-zsh, the atutocompletion script can be installed by putting the `_dbt` file in the folder `~/.oh-my-zsh/completions/` (create the completions folder if it doesn't exist).
+If using oh-my-zsh, the autocompletion script can be installed by putting the `_dbt` file in the folder `~/.oh-my-zsh/completions/` (create the completions folder if it doesn't exist).
 
 #### Manual installation
 

@@ -144,7 +144,7 @@ _dbt_list_models() {
     # fi
 
     project_dir="$(_get_project_root)"
-    if [ -z $"DBT_MANIFEST_PATH" ] ; then
+    if [ -z "$DBT_MANIFEST_PATH" ] ; then
         manifest_path="${project_dir}/target/manifest.json"
     else
         manifest_path="$DBT_MANIFEST_PATH"

@@ -7,7 +7,7 @@
 #       3. Doing some bash magic to autocomplete selectors for:
 #           -m
 #           --model[s]
-#           -s 
+#           -s
 #           --select
 #           --exclude
 #
@@ -125,7 +125,7 @@ _get_project_root() {
 # Lists the difference models, extracted from manifest.json
 _dbt_list_models() {
 
-    # Wanted to look at $words to know when or not to suggest models, 
+    # Wanted to look at $words to know when or not to suggest models,
     # but the issue is that $words seems to reset after the first argument has been typed
 
 
@@ -144,7 +144,13 @@ _dbt_list_models() {
     # fi
 
     project_dir="$(_get_project_root)"
-    manifest_path="${project_dir}/target/manifest.json"
+
+    # Attempt to fetch the manifest path from the environment variable
+    if [ -z "$DBT_MANIFEST_PATH" ] ; then
+        manifest_path="${project_dir}/target/manifest.json"
+    else
+        manifest_path="$DBT_MANIFEST_PATH"
+    fi
 
     if [ ! -f "$manifest_path" ] ; then
         return
@@ -227,7 +233,7 @@ _dbt_list() {
 # Main function
 # Contains the global actions and flags
 _dbt() {
-    
+
     local -a state commands common_test_run_build_args profile_args
 
     profile_args=(

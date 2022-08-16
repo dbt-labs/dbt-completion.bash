@@ -223,7 +223,13 @@ _dbt_list_models() {
 _dbt_list_selectors() {
 
     project_dir="$(_get_project_root)"
-    manifest_path="${project_dir}/target/manifest.json"
+
+    # Attempt to fetch the manifest path from the environment variable
+    if [ -z "$DBT_MANIFEST_PATH" ] ; then
+        manifest_path="${project_dir}/target/manifest.json"
+    else
+        manifest_path="$DBT_MANIFEST_PATH"
+    fi
 
     if [ ! -f "$manifest_path" ] ; then
         return

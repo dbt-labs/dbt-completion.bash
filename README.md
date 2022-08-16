@@ -3,9 +3,9 @@
 
 ### What
 
-This script adds autocompletion to the [dbt](https://www.getdbt.com/) CLI. Once installed, users can tab-complete model, tag, source, and package selectors to node selection flags like `--models` and `--exclude`. Need a refresher on resource selection? Check out [the docs](https://docs.getdbt.com/reference#run).
+This script adds autocompletion to the [dbt](https://www.getdbt.com/) CLI. Once installed, users can tab-complete model, tag, source, and package selectors to node selection flags like `--select` and `--exclude`. Need a refresher on resource selection? Check out [the docs](https://docs.getdbt.com/reference/node-selection/syntax).
 
-**Example usage (using the [redshift package](https://github.com/fishtown-analytics/redshift)):**
+**Example usage (using the [redshift package](https://github.com/dbt-labs/redshift)):**
 ```
 $ dbt run --model red<TAB>
 redshift.*                                  redshift_admin_queries                      redshift_constraints
@@ -35,7 +35,7 @@ echo 'autoload -U +X bashcompinit && bashcompinit' >> ~/.zshrc
 echo 'source ~/.dbt-completion.bash' >> ~/.zshrc
 ```
 
-### Installation (zsh script)
+### Installation (zsh-only script, with more features)
 
 #### Using oh-my-zsh
 

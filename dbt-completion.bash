@@ -195,7 +195,13 @@ _complete_it() {
         current_arg="${COMP_WORDS[$COMP_CWORD]}"
         prefix=$(_get_arg_prefix $current_arg)
         project_dir=$(_get_project_root)
-        manifest_path="${project_dir}/target/manifest.json"
+
+        # Attempt to fetch the manifest path from the environment variable
+        if [ -z "$DBT_MANIFEST_PATH" ] ; then
+            manifest_path="${project_dir}/target/manifest.json"
+        else
+            manifest_path="$DBT_MANIFEST_PATH"
+        fi
 
         # Bail out if we can't find a manifest
         if [ ! -f "$manifest_path" ] ; then

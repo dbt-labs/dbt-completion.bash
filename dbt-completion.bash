@@ -62,24 +62,24 @@ _parse_manifest() {
     # for all .nodes, get .name from the ones with .resource_type == 'model' or 'seed',
     # append prefix to the name and remove duplicates to the output
     models=$(jq -r --arg prefix "$local_prefix" '
-    .nodes | with_entries(select(.value.resource_type | IN("model", "seed"))) | values[] |
-    $prefix + .name
-    ' <<< "$manifest" | sort -u)
+        .nodes | with_entries(select(.value.resource_type | IN("model", "seed"))) | values[] |
+        $prefix + .name
+        ' <<< "$manifest" | sort -u)
 
     # for all .nodes, get .tags from the ones with .resource_type == 'model',
     # append prefix to the tag and remove duplicates to the output
     tags=$(jq -r --arg prefix "$local_prefix" '
-    .nodes | with_entries(select(.value.resource_type == "model")) | values[] |
-    .tags[] | $prefix + "tag:" + .
-    ' <<< "$manifest" | sort -u)
+        .nodes | with_entries(select(.value.resource_type == "model")) | values[] |
+        .tags[] | $prefix + "tag:" + .
+     ' <<< "$manifest" | sort -u)
 
     # for all .nodes, get .source_name from the ones with .resource_type == 'source',
     # append prefix to the source_name and remove duplicates to the output,
     sources=$(jq -r --arg prefix "$local_prefix" '
-    .nodes | with_entries(select(.value.resource_type == "source")) | values[] |
-    ($prefix + "source:" + .source_name),
-    ($prefix + "source:" + .source_name + "." + .name)
-    ' <<< "$manifest" | sort -u)
+        .nodes | with_entries(select(.value.resource_type == "source")) | values[] |
+        ($prefix + "source:" + .source_name),
+        ($prefix + "source:" + .source_name + "." + .name)
+        ' <<< "$manifest" | sort -u)
 
     # for all .nodes, get .fqn from the ones with .resource_type == 'model',
     # append prefix to the fqn and remove duplicates to the output

@@ -43,75 +43,53 @@
 # Inline a python script so we can deploy this as a single file
 # the idea of doing this in bash natively is... daunting
 _parse_manifest() {
-manifest_path=$1
-prefix=$2
-prog=$(cat <<EOF
-# Use a big try/catch so any errors (maybe from a corrupted or
-# missing manifest?) are not printed on tab-complete
+    manifest_path=$1
+    prefix=$2
+    local_prefix=""
+    manifest=""
 
-try:
-    import fileinput, json, sys
+    if [ $# -eq 2 ]; then
+        # get the prefix if the number of args is 2, if not, use an empty string
+        local_prefix=$2
 
-    # If a prefix is given as an argument, include it in the
-    # generated selector list. The bash completion logic below
-    # will match these generated selectors against partially
-    # written args when table completed. This helps the script
-    # match selectors when a user does something like:
-    #   dbt run --models +order<tab>
+        # concatenate all the file arguments into a single string except the last one
+        manifest=$(cat ${@:1:$#-1})
+    else
+        # concatenate all the file arguments into a single string
+        manifest=$(cat $@)
+    fi
 
-    prefix = sys.argv.pop() if len(sys.argv) == 2 else ""
+    # for all .nodes, get .name from the ones with .resource_type == 'model' or 'seed',
+    # append prefix to the name and remove duplicates to the output
+    models=$(jq -r --arg prefix "$local_prefix" '
+    .nodes | with_entries(select(.value.resource_type | IN("model", "seed"))) | values[] |
+    $prefix + .name
+    ' <<< "$manifest" | sort -u)
 
-    manifest = json.loads("\n".join([line for line in fileinput.input()]))
+    # for all .nodes, get .tags from the ones with .resource_type == 'model',
+    # append prefix to the tag and remove duplicates to the output
+    tags=$(jq -r --arg prefix "$local_prefix" '
+    .nodes | with_entries(select(.value.resource_type == "model")) | values[] |
+    .tags[] | $prefix + "tag:" + .
+    ' <<< "$manifest" | sort -u)
 
-    models = set(
-        "{}{}".format(prefix, node['name'])
-        for node in manifest['nodes'].values()
-        if node['resource_type'] in ['model', 'seed']
-    )
+    # for all .nodes, get .source_name from the ones with .resource_type == 'source',
+    # append prefix to the source_name and remove duplicates to the output,
+    sources=$(jq -r --arg prefix "$local_prefix" '
+    .nodes | with_entries(select(.value.resource_type == "source")) | values[] |
+    ($prefix + "source:" + .source_name),
+    ($prefix + "source:" + .source_name + "." + .name)
+    ' <<< "$manifest" | sort -u)
 
-    tags = set(
-        "{}tag:{}".format(prefix, tag)
-        for node in manifest['nodes'].values()
-        for tag in node.get('tags', [])
-        if node['resource_type'] == 'model'
-    )
+    # for all .nodes, get .fqn from the ones with .resource_type == 'model',
+    # append prefix to the fqn and remove duplicates to the output
+    fqns=$(jq -r --arg prefix "$local_prefix" '
+        .nodes | with_entries(select(.value.resource_type == "model")) | values[] |
+        [.fqn[]] | [($prefix + .[0]), .[1:-1][]] | join(".") + ".*"
+        ' <<< "$manifest" | sort -u)
 
-    # The + prefix for sources is not sensible, but allowed.
-    # This script shouldn't be opinionated about these things
-    sources = set(
-        "{}source:{}".format(prefix, node['source_name'])
-        for node in manifest['nodes'].values()
-        if node['resource_type'] == 'source'
-    ) | set(
-        "{}source:{}.{}".format(prefix, node['source_name'], node['name'])
-        for node in manifest['nodes'].values()
-        if node['resource_type'] == 'source'
-    )
-
-    # Generate partial Fully Qualified Names with a wildcard
-    # suffix. This matches things like directories and packag names
-    fqns = set(
-        "{}{}.*".format(prefix, ".".join(node['fqn'][:i-1]))
-        for node in manifest['nodes'].values()
-        for i in range(len(node.get('fqn', [])))
-        if node['resource_type'] == 'model'
-    )
-
-    selectors = [
-        selector
-        for selector in (models | tags | sources | fqns)
-        if selector != ''
-    ]
-
-    print("\n".join(selectors))
-except Exception as e:
-    print(e)
-    # oops!
-    pass
-EOF
-)
-
-cat "$manifest_path" | python -c "$prog" $prefix
+    # concat all selectors and remove any possible empty lines
+    echo -e "$models\n$tags\n$sources\n$fqns" | sed '/^\s*$/d'
 }
 
 # Iterate backwards in the arg list from the index

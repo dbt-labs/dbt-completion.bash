@@ -2,6 +2,7 @@
 
 # OVERVIEW
 #   Adds autocompletion to dbt CLI by:
+#       0. Integrate Click-generated shell script for subcommand and param completion
 #       1. Finding the root of the repo (identified by dbt_project.yml
 #       2. Parsing target/manifest.json file, extracting valid model selectors
 #       3. Doing some bash magic to autocomplete selectors for:
@@ -223,6 +224,33 @@ _complete_it() {
         if [[ -n "$BASH" ]] && [[ $(type -t __ltrim_colon_completions ) == 'function' ]] ; then
             __ltrim_colon_completions "$cur"
         fi
+    else
+        # Only continue if dbt can be found
+        if ! command -v $1 &> /dev/null; then
+            return 0
+        fi
+
+        # The following was generated using `_DBT_COMPLETE=bash_source dbt`
+        local IFS=$'\n'
+        local response
+
+        response=$(env COMP_WORDS="${COMP_WORDS[*]}" COMP_CWORD=$COMP_CWORD _DBT_COMPLETE=bash_complete $1)
+
+        for completion in $response; do
+            IFS=',' read type value <<< "$completion"
+
+            if [[ $type == 'dir' ]]; then
+                COMPREPLY=()
+                compopt -o dirnames
+            elif [[ $type == 'file' ]]; then
+                COMPREPLY=()
+                compopt -o default
+            elif [[ $type == 'plain' ]]; then
+                COMPREPLY+=($value)
+            fi
+        done
+
+        return 0
     fi
 }
 

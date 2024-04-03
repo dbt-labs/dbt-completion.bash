@@ -41,6 +41,13 @@ echo 'source ~/.dbt-completion.bash' >> ~/.zshrc
 
 If using oh-my-zsh, the autocompletion script can be installed by putting the `_dbt` file in the folder `~/.oh-my-zsh/completions/` (create the completions folder if it doesn't exist).
 
+#### Using zinit
+
+```
+zinit ice as"completion"
+zinit snippet https://github.com/dbt-labs/dbt-completion.bash/blob/master/_dbt
+```
+
 #### Manual installation
 
 If installing manually, instructions from [zsh-completions](https://github.com/zsh-users/zsh-completions) mention that you need to include the directory where `_dbt` is stored in your `$fpath` by adding the following to `~/.zshrc`

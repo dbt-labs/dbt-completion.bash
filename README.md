@@ -43,6 +43,8 @@ If using oh-my-zsh, the autocompletion script can be installed by putting the `_
 
 #### Using zinit
 
+Add the following to your zshrc file:
+
 ```
 zinit ice as"completion"
 zinit snippet https://github.com/dbt-labs/dbt-completion.bash/blob/master/_dbt

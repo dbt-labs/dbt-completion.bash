@@ -110,7 +110,7 @@ try:
     }
 
     selectors = [
-        selector.replace(':', '\:')
+        selector.replace(':', r'\:')
         for selector in (models | tags | sources | exposures | metrics | fqns | hard_coded)
         if selector != ''
     ]

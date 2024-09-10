@@ -194,7 +194,13 @@ _complete_it() {
     if [[ $is_selector == 0 ]] ; then
         current_arg="${COMP_WORDS[$COMP_CWORD]}"
         prefix=$(_get_arg_prefix $current_arg)
-        project_dir=$(_get_project_root)
+
+        # Attempt to fetch the project directory from the environment variable
+        if [ -z "$DBT_PROJECT_DIR" ] ; then
+            project_dir=$(_get_project_root)
+        else
+            project_dir="$DBT_PROJECT_DIR"
+        fi
 
         # Attempt to fetch the manifest path from the environment variable
         if [ -z "$DBT_MANIFEST_PATH" ] ; then

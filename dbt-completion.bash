@@ -165,9 +165,14 @@ _get_arg_prefix() {
     fi
 }
 
-# Walk up the filesystem until we find a dbt_project.yml file,
+# Check if DBT_PROJECT_DIR is set and not empty
+# Otherwise, walk up the filesystem until we find a dbt_project.yml file,
 # then return the path which contains it (if found)
 _get_project_root() {
+  if [ -n "$DBT_PROJECT_DIR" ]; then
+    echo "$DBT_PROJECT_DIR" && return
+  fi
+
   slashes=${PWD//[^\/]/}
   directory="$PWD"
   for (( n=${#slashes}; n>0; --n ))

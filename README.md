@@ -29,7 +29,7 @@ The z shell requires a bit more work, you'll also want to automatically load `co
 This makes use of zsh's ability to import bash completion scripts and use them, as long as they're script-compatible.
 
 ```
-curl https://raw.githubusercontent.com/fishtown-analytics/dbt-completion.bash/master/dbt-completion.bash > ~/.dbt-completion.bash
+curl https://raw.githubusercontent.com/dbt-labs/dbt-completion.bash/master/dbt-completion.bash > ~/.dbt-completion.bash
 echo 'autoload -U +X compinit && compinit' >> ~/.zshrc
 echo 'autoload -U +X bashcompinit && bashcompinit' >> ~/.zshrc
 echo 'source ~/.dbt-completion.bash' >> ~/.zshrc

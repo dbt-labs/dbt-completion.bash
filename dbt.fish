@@ -43,25 +43,56 @@ function __dbt_list_models
     end
     test -f $manifest || return
 
-    python3 -c "
-import json
+    # If the current token starts with "-" we're still on the flag itself, not its argument.
+    set -l cur (commandline -ct)
+    string match -qr -- '^-' $cur && return
+
+    # Parse comma-separated and +/@ prefixes from the current token.
+    set -l comma_prefix ""
+    set -l node_prefix ""
+    if string match -qr -- ',' $cur
+        set comma_prefix (string replace -r -- '[^,]*$' '' $cur)
+        set cur (string replace -r -- '^.*,' '' $cur)
+    end
+    if string match -qr -- '^[+@]' $cur
+        set node_prefix (string sub -l 1 $cur)
+    end
+
+    # Cache the base model list next to the manifest (in target/) so it is
+    # project-scoped and cleaned up by `dbt clean`. Invalidated by manifest mtime.
+    set -l models_cache (path dirname $manifest)/.dbt_completion_cache.txt
+    set -l models_key_cache (path dirname $manifest)/.dbt_completion_cache.key
+    set -l manifest_key (stat -f %m $manifest 2>/dev/null; or stat -c %Y $manifest 2>/dev/null)
+
+    if not test -f $models_cache; or test (cat $models_key_cache 2>/dev/null) != $manifest_key
+        python3 -c '
+import json, sys
 try:
-    manifest = json.load(open('$manifest'))
+    manifest = json.load(open(sys.argv[1]))
     results = set()
-    for node in manifest.get('nodes', {}).values():
-        if node.get('resource_type') in ('model', 'seed'):
-            results.add(node['name'])
-    for node in manifest.get('sources', {}).values():
-        results.add('source:' + node['source_name'])
-        results.add('source:' + node['source_name'] + '.' + node['name'])
-    for node in manifest.get('exposures', {}).values():
-        results.add('exposure:' + node['name'])
-    for node in manifest.get('metrics', {}).values():
-        results.add('metric:' + node['name'])
-    print('\n'.join(sorted(results)))
+    for node in manifest.get("nodes", {}).values():
+        if node.get("resource_type") in ("model", "seed"):
+            results.add(node["name"])
+    for node in manifest.get("sources", {}).values():
+        results.add("source:" + node["source_name"])
+        results.add("source:" + node["source_name"] + "." + node["name"])
+    for node in manifest.get("exposures", {}).values():
+        results.add("exposure:" + node["name"])
+    for node in manifest.get("metrics", {}).values():
+        results.add("metric:" + node["name"])
+    print("\n".join(sorted(results)))
 except:
     pass
-"
+' $manifest > $models_cache
+        echo $manifest_key > $models_key_cache
+    end
+
+    # Apply prefix to cached results and print
+    if test -n "$comma_prefix$node_prefix"
+        string replace -r -- '^' "$comma_prefix$node_prefix" < $models_cache
+    else
+        cat $models_cache
+    end
 end
 
 function __dbt_list_yaml_selectors
@@ -85,14 +116,6 @@ except:
 "
 end
 
-function __dbt_completing_selector
-    set -l prev (commandline -opc)[-1]
-    contains -- $prev -s --select --exclude -m --model --models
-end
-
-function __dbt_completing_yaml_selector
-    test (commandline -opc)[-1] = --selector
-end
 
 
 # --- Binary detection and completion caching ---
@@ -146,8 +169,12 @@ end
 
 
 # --- Manifest-based model/selector completions (applies to both dbt and dbtf) ---
+# Add model completions directly to the selector flags so fish associates them
+# with the flag argument rather than relying on a separate condition check.
 
 for __dbt_cmd in dbt dbtf
-    complete -c $__dbt_cmd -f -n '__dbt_completing_selector' -a '(__dbt_list_models)'
-    complete -c $__dbt_cmd -f -n '__dbt_completing_yaml_selector' -a '(__dbt_list_yaml_selectors)'
+    complete -c $__dbt_cmd -f -s s -l select -r -a '(__dbt_list_models)'
+    complete -c $__dbt_cmd -f -l exclude -r -a '(__dbt_list_models)'
+    complete -c $__dbt_cmd -f -s m -l model -l models -r -a '(__dbt_list_models)'
+    complete -c $__dbt_cmd -f -l selector -r -a '(__dbt_list_yaml_selectors)'
 end

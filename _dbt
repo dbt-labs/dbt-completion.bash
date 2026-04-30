@@ -2,21 +2,24 @@
 
 # OVERVIEW
 #   Adds autocompletion to dbt CLI by:
-#       1. Finding the root of the repo (identified by dbt_project.yml
-#       2. Parsing target/manifest.json file, extracting valid model selectors
-#       3. Doing some bash magic to autocomplete selectors for:
-#           -m
-#           --model[s]
-#           -s
-#           --select
+#       1. Auto-detecting whether dbt is dbt-core (Click) or dbt-fusion (clap)
+#       2. Using Click's built-in completion for dbt-core commands and flags
+#          OR clap_complete (via `dbt completions zsh`) for dbt-fusion — cached
+#          by binary mtime so it only regenerates when the binary changes
+#       3. Enhancing with manifest.json parsing for intelligent model/selector
+#          completions for both dbt-core and dbt-fusion
+#       4. Finding the root of the repo (identified by dbt_project.yml)
+#       5. Extracting valid model selectors from target/manifest.json for:
+#           -m / --model[s]
+#           -s / --select
 #           --exclude
+#           --selector
 #
 # NOTE: This script uses the manifest (assumed to be at target/manifest.json)
 #       to _quickly_ provide a list of existing selectors. As such, a dbt
 #       resource must be compiled before it will be available for tab completion.
-#       In the future, this script should use dbt directly to parse the project
-#       directory and generate possible selectors. Until then, brand new
-#       models/sources/tags/packages will not be displayed in the tab complete menu
+#       Brand new models/sources/tags/packages will not be displayed in the tab
+#       complete menu until they are compiled and appear in the manifest.
 #
 #
 # CREDITS
@@ -247,163 +250,146 @@ _dbt_list_selectors() {
 }
 
 
-# Provides sub-commands and arguments for dbt docs
-_dbt_docs() {
+# Detect whether the dbt binary is dbt-fusion or dbt-core.
+# Result is cached (keyed by binary path + mtime) to avoid running --help on every tab press.
+_dbt_detect_type() {
+    local bin_path
+    bin_path=$(command -v dbt) || return
 
-    action=(
-      "generate"
-      "serve"
-    )
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}"
+    local type_cache="$cache_dir/dbt_binary_type"
+    local key_cache="$cache_dir/dbt_binary_key"
+    local current_key="${bin_path}:$(stat -f %m "$bin_path" 2>/dev/null)"
 
-    _describe -t action 'action' action
+    if [[ -f "$type_cache" ]] && [[ "$(cat "$key_cache" 2>/dev/null)" == "$current_key" ]]; then
+        cat "$type_cache"
+        return
+    fi
 
-    _arguments -C -s -S -n \
-        $profile_args \
-        '(- 1 *)'{-h,--help}"[show the help message and exit]"  \
-        '(-t --target)'{-t,--target}"[which target to load for the given profile]:()"  \
-        --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
-        --no-compile"[Do not run \"dbt compile\" as part of docs generation]"
+    local first_line
+    first_line=$(dbt --help 2>/dev/null | head -1)
+
+    local type="core"
+    if [[ "$first_line" == *"dbt-fusion"* ]]; then
+        type="fusion"
+    fi
+
+    mkdir -p "$cache_dir"
+    printf '%s' "$type" > "$type_cache"
+    printf '%s' "$current_key" > "$key_cache"
+    printf '%s' "$type"
 }
 
-# Provides arguments for dbt build
-_dbt_build() {
 
-    _arguments -C -s -S -n \
-        $common_test_run_build_args \
-        $profile_args \
-        --full-refresh"[perform full-refresh]" \
-        --resource-type"[type of resources to select]:res:(model snapshot test seed all)" \
-        '*:: :_dbt_list_models'
+# For dbt-fusion: source the clap_complete-generated zsh script (cached by binary mtime),
+# then delegate to the _dbt function it defines.
+_dbt_fusion_complete() {
+    local bin_path
+    bin_path=$(command -v dbt) || return 1
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}"
+    local script_cache="$cache_dir/dbt_fusion_completions.zsh"
+    local key_cache="$cache_dir/dbt_fusion_completions.key"
+    local current_key="${bin_path}:$(stat -f %m "$bin_path" 2>/dev/null)"
+
+    if [[ ! -f "$script_cache" ]] || [[ "$(cat "$key_cache" 2>/dev/null)" != "$current_key" ]]; then
+        mkdir -p "$cache_dir"
+        dbt completions zsh > "$script_cache" 2>/dev/null
+        printf '%s' "$current_key" > "$key_cache"
+    fi
+
+    # Source the clap-generated script; it redefines _dbt with clap's completion logic.
+    # Rename it to _dbt_clap so it doesn't clobber this function, then call it.
+    local script_content
+    script_content=$(sed 's/^_dbt()/_dbt_clap()/' "$script_cache")
+    eval "$script_content"
+    _dbt_clap "$@"
 }
 
-# Provides arguments for dbt test
-_dbt_test() {
 
-    _arguments -C -s -S -n \
-        $common_test_run_build_args \
-        $profile_args \
-        '(-m --model)'{-m,--model}"[specify the models to include]:models:_dbt_list_models"  \
-        '*:: :_dbt_list_models'
-}
+# For dbt-core: Click runtime completion.
+# Note: spawns a Python process per tab press, so inherently slower than dbt-fusion.
+_dbt_core_complete() {
+    local ret=1
+    local IFS=$'\n'
+    local response
 
-# Provides arguments for dbt run
-_dbt_run() {
+    # COMP_CWORD in Click is 0-indexed for the position we're completing
+    response=$(env COMP_WORDS="${words[*]}" COMP_CWORD=$((CURRENT - 1)) _DBT_COMPLETE=zsh_complete dbt 2>/dev/null)
 
-    _arguments -C -s -S -n \
-        $common_test_run_build_args \
-        $profile_args \
-        --full-refresh"[perform full-refresh]" \
-        '(-m --model)'{-m,--model}"[specify the models to include]:models:_dbt_list_models"  \
-        '*:: :_dbt_list_models'
-}
+    if [[ -n "$response" ]]; then
+        local lines=("${(@f)response}")
+        local i=1
+        local -a completions descriptions
 
-# Provides arguments for dbt ls / list
-_dbt_list() {
+        while (( i <= ${#lines[@]} )); do
+            local comp_type="${lines[i]}"
+            local comp_value="${lines[i+1]}"
+            local comp_desc="${lines[i+2]}"
 
-    _arguments -C -s -S -n \
-        $profile_args \
-        '(-s --select)'{-s,--select}"[specify the nodes to include]:models:_dbt_list_models"  \
-        '(--exclude)'--exclude"[specify models to exclude]:models:_dbt_list_models"  \
-        --selector"[the selector name to use, as defined in selectors.yml]:selectors:_dbt_list_selectors" \
-        --resource-type"[type of resources to select]:res:(exposure snapshot metric analysis model source seed test default all)" \
-        --output"[format of the output]:outp:(json name path selector)" \
-        --output-keys"[if --output json, this flag controls which node properties are included in the output]:()" \
-        
+            if [[ $comp_type == 'dir' ]]; then
+                _files -/ && ret=0
+            elif [[ $comp_type == 'file' ]]; then
+                _files && ret=0
+            elif [[ $comp_type == 'plain' ]]; then
+                if [[ -n "$comp_desc" ]]; then
+                    descriptions+=("$comp_value:$comp_desc")
+                else
+                    completions+=("$comp_value")
+                fi
+                ret=0
+            fi
+
+            i=$((i + 3))
+        done
+
+        if (( ${#descriptions[@]} > 0 )); then
+            _describe 'dbt commands' descriptions
+        elif (( ${#completions[@]} > 0 )); then
+            compadd -U -a completions
+        fi
+    fi
+
+    return ret
 }
 
 
 # Main function
-# Contains the global actions and flags
+# Auto-detects dbt-core vs dbt-fusion and routes to the appropriate completion backend.
+# Manifest-based model/selector completions are applied for both.
 _dbt() {
+    local ret=1
 
-    local -a state commands common_test_run_build_args profile_args
+    if ! command -v dbt &> /dev/null; then
+        return 1
+    fi
 
-    profile_args=(
-        --profile"[which profile to load]:profile:_files" \
-        --profiles-dir"[which directory to look in for the profiles.yml file]:profile:_files" \
-        --project-dir"[which directory to look in for the dbt_project.yml file]:dir:_files" \
-    )
+    # Manifest-based model/selector completions apply regardless of binary type
+    local prev_word=""
+    if (( CURRENT > 1 )); then
+        prev_word="${words[CURRENT-1]}"
+    fi
 
-    common_test_run_build_args=(
-        '(- 1 *)'{-h,--help}"[show the help message and exit]"  \
-        '(-s --select)'{-s,--select}"[specify the nodes to include]:models:_dbt_list_models"  \
-        '(--exclude)'--exclude"[specify models to exclude]:models:_dbt_list_models"  \
-        '(-t --target)'{-t,--target}"[which target to load for the given profile]:()"  \
-        '(-x --fail-fast)'{-x,--fail-fast}"[stop execution upon a first test failure]"  \
-        --vars"[supply variables to the project - eg. '{my_variable: my_value}']:()" \
-        --threads"[specify number of threads to use while executing models]:()" \
-        --selector"[the selector name to use, as defined in selectors.yml]:selectors:_dbt_list_selectors" \
-        --state"[if set, use the given directory as the source for json files to compare with this project.]:state:_files" \
-        --defer"[If set, defer to the state variable for resolving unselected nodes.]" \
-        --no-defer"[if set, do not defer to the state variable for resolving unselected nodes.]" \
-        --store-failures"[store test results (failing rows) in the database]" \
-        --indirect-selection"[select all tests that are adjacent to selected resources, even if they those resources have been explicitly selected.]:opts:(eager cautious)" \
-    )
-
-    commands=(
-      "build:run all Seeds, Models, Snapshots, and tests in DAG order"
-      "run:run SQL transformation"
-      "test:runs tests on data in deployed model"
-      "seed:load csv seeds"
-      "docs:generate and serve docs"
-      "compile:generates executable sql - written to the target/ directory"
-      "clean:delete all folders in the clean-targets list"
-      "debug:show some helpful information about dbt for debugging"
-      "ls:list the resources in your project"
-      "snapshot:execute snapshots defined in your project"
-      "run-operation:run the named macro with any supplied arguments"
-      "deps:pull the most recent version of the dependencies listed in packages.yml"
-      "parse:parse the project and provides information on performance"
-      "source:manage your project's sources"
-    )
-
-    _arguments -C -s -S -n \
-        '(- 1 *)'--version"[Show version information]: :->full" \
-        '(- 1 *)'{-h,--help}'[show the help message and exit]: :->full' \
-        '(-d --debug)'{-d,--debug}"[display debug logging during dbt execution]" \
-        '(--log-format)'--log-format"[specify the log forma]:log format:(text json default)" \
-        --warn-error'[display usage information]' \
-        --partial-parse'[allow for partial parsing by looking for and writing to a pickle file in the target directory]' \
-        --no-version-check"[If set, skip ensuring dbt's version matches the one specified in the dbt_project.ym]" \
-        '1:cmd:->cmds' \
-        '*:: :->args' && ret=0
-
-    case "$state" in
-      (cmds)
-          _describe -t commands 'commands' commands
-      ;;
-      (args)
-         local cmd
-         cmd=$words[1]
-         case "$cmd" in
-             (build)
-                 _dbt_build && ret=0
-             ;;
-             (run)
-                 _dbt_run && ret=0
-             ;;
-             (test)
-                 _dbt_test && ret=0
-             ;;
-             (docs)
-                 _dbt_docs && ret=0
-             ;;
-             (list)
-                 _dbt_list && ret=0
-             ;;
-             (ls)
-                 _dbt_list && ret=0
-             ;;
-             (*)
-                 _default && ret=0
-             ;;
-         esac
-      ;;
-      (*)
-      ;;
+    case "$prev_word" in
+        -s|--select|-m|--model|--models|--exclude)
+            _dbt_list_models
+            return $?
+            ;;
+        --selector)
+            _dbt_list_selectors
+            return $?
+            ;;
     esac
 
-    return ret
+    local dbt_type
+    dbt_type=$(_dbt_detect_type)
+
+    if [[ "$dbt_type" == "fusion" ]]; then
+        _dbt_fusion_complete "$@"
+    else
+        _dbt_core_complete "$@"
+    fi
+    return $?
 }
 
 _dbt

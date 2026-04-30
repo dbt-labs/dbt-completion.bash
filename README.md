@@ -5,6 +5,13 @@
 
 This script adds autocompletion to the [dbt](https://www.getdbt.com/) CLI. Once installed, users can tab-complete model, tag, source, and package selectors to node selection flags like `--select` and `--exclude`. Need a refresher on resource selection? Check out [the docs](https://docs.getdbt.com/reference/node-selection/syntax).
 
+The zsh script (`_dbt`) supports both **dbt Core** and **Fusion**. It auto-detects which binary is on your `$PATH` and uses the appropriate completion backend — no configuration needed:
+
+- **dbt Core**: uses Click's built-in runtime completion
+- **Fusion**: uses `dbt completions zsh` (clap_complete), cached by binary mtime for near-instant completions
+
+Model and selector completions from `manifest.json` work the same way for both.
+
 **Example usage (using the [redshift package](https://github.com/dbt-labs/redshift)):**
 ```
 $ dbt run --model red<TAB>

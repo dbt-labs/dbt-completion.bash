@@ -184,24 +184,6 @@ _get_project_root() {
 # Lists the difference models, extracted from manifest.json
 _dbt_list_models() {
 
-    # Wanted to look at $words to know when or not to suggest models,
-    # but the issue is that $words seems to reset after the first argument has been typed
-
-
-    # Option 1 to try to capture if the last flag is for a model (does not work because $words resets)
-    # if [ $(($words[(I)--model] + $words[(I)-m])) != $words[(I)-*] ] || [ $words[(I)-*] = 0 ]
-    # then
-    #     return
-    # fi
-
-    # Option 2 to try to capture if the last flag is for a model  (does not work because $words resets)
-    # last_flag=$(_get_last_flag ${#words} $words)
-    # is_selector=$(_flag_is_selector $last_flag)
-    #
-    # if [[ $is_selector == 0 ]] ; then
-    #     return
-    # fi
-
     project_dir="$(_get_project_root)"
 
     # Attempt to fetch the manifest path from the environment variable
@@ -215,13 +197,26 @@ _dbt_list_models() {
         return
     fi
 
+    # Cache the base model list in target/.dbt_completion_cache.txt (keyed by
+    # manifest mtime) so Python is only invoked when the manifest changes.
+    local cache_file="${manifest_path:h}/.dbt_completion_cache.txt"
+    local key_file="${manifest_path:h}/.dbt_completion_cache.key"
+    local manifest_key
+    manifest_key=$(stat -f %m "$manifest_path" 2>/dev/null || stat -c %Y "$manifest_path" 2>/dev/null)
+
+    if [[ ! -f "$cache_file" ]] || [[ "$(cat "$key_file" 2>/dev/null)" != "$manifest_key" ]]; then
+        _parse_manifest "$manifest_path" "" > "$cache_file"
+        printf '%s' "$manifest_key" > "$key_file"
+    fi
+
     local first_letter
     first_letter=${words[-1]:0:1}
 
+    local models_list
     if [ "$first_letter" = "+" ] || [ "$first_letter" = "@" ]; then
-        local models_list=( $(_parse_manifest "$manifest_path" "$first_letter") )
+        models_list=( $(sed "s/^/${first_letter}/" "$cache_file") )
     else
-        local models_list=( $(_parse_manifest "$manifest_path" "") )
+        models_list=( $(cat "$cache_file") )
     fi
     _values -s , 'models' $models_list
 }
@@ -243,7 +238,17 @@ _dbt_list_selectors() {
         return
     fi
 
-    local selectors_list=( $(_parse_selectors "$manifest_path") )
+    local cache_file="${manifest_path:h}/.dbt_completion_cache_selectors.txt"
+    local key_file="${manifest_path:h}/.dbt_completion_cache_selectors.key"
+    local manifest_key
+    manifest_key=$(stat -f %m "$manifest_path" 2>/dev/null || stat -c %Y "$manifest_path" 2>/dev/null)
+
+    if [[ ! -f "$cache_file" ]] || [[ "$(cat "$key_file" 2>/dev/null)" != "$manifest_key" ]]; then
+        _parse_selectors "$manifest_path" > "$cache_file"
+        printf '%s' "$manifest_key" > "$key_file"
+    fi
+
+    local selectors_list=( $(cat "$cache_file") )
     if [ "$selectors_list" != "" ]; then
         _values -s , 'selectors' $selectors_list
     fi

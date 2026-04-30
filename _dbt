@@ -1,4 +1,4 @@
-#compdef dbt
+#compdef dbt dbtf
 
 # OVERVIEW
 #   Adds autocompletion to dbt CLI by:
@@ -283,9 +283,10 @@ _dbt_detect_type() {
 
 # For dbt-fusion: source the clap_complete-generated zsh script (cached by binary mtime),
 # then delegate to the _dbt function it defines.
+# Accepts an optional explicit binary path (used when completing the dbtf alias).
 _dbt_fusion_complete() {
-    local bin_path
-    bin_path=$(command -v dbt) || return 1
+    local bin_path="${1:-$(command -v dbt)}"
+    [[ -z "$bin_path" ]] && return 1
 
     local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}"
     local script_cache="$cache_dir/dbt_fusion_completions.zsh"
@@ -294,7 +295,7 @@ _dbt_fusion_complete() {
 
     if [[ ! -f "$script_cache" ]] || [[ "$(cat "$key_cache" 2>/dev/null)" != "$current_key" ]]; then
         mkdir -p "$cache_dir"
-        dbt completions zsh > "$script_cache" 2>/dev/null
+        "$bin_path" completions zsh > "$script_cache" 2>/dev/null
         printf '%s' "$current_key" > "$key_cache"
     fi
 
@@ -356,13 +357,10 @@ _dbt_core_complete() {
 
 # Main function
 # Auto-detects dbt-core vs dbt-fusion and routes to the appropriate completion backend.
+# For the dbtf alias (always Fusion), the binary path is resolved from the alias value.
 # Manifest-based model/selector completions are applied for both.
 _dbt() {
     local ret=1
-
-    if ! command -v dbt &> /dev/null; then
-        return 1
-    fi
 
     # Manifest-based model/selector completions apply regardless of binary type
     local prev_word=""
@@ -381,13 +379,24 @@ _dbt() {
             ;;
     esac
 
+    # dbtf is always Fusion; resolve the binary from the alias value directly
+    if [[ "$service" == "dbtf" ]]; then
+        local dbtf_bin="${aliases[dbtf]}"
+        _dbt_fusion_complete "$dbtf_bin"
+        return $?
+    fi
+
+    if ! command -v dbt &> /dev/null; then
+        return 1
+    fi
+
     local dbt_type
     dbt_type=$(_dbt_detect_type)
 
     if [[ "$dbt_type" == "fusion" ]]; then
-        _dbt_fusion_complete "$@"
+        _dbt_fusion_complete
     else
-        _dbt_core_complete "$@"
+        _dbt_core_complete
     fi
     return $?
 }

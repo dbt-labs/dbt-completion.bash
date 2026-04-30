@@ -2,10 +2,14 @@
 
 # OVERVIEW
 #   Adds autocompletion to dbt CLI by:
-#       1. Using Click's built-in completion for all dbt commands and flags
-#       2. Enhancing with manifest.json parsing for intelligent model/selector completions
-#       3. Finding the root of the repo (identified by dbt_project.yml)
-#       4. Extracting valid model selectors from target/manifest.json for:
+#       1. Auto-detecting whether dbt is dbt-core (Click) or dbt-fusion (clap)
+#       2. Using Click's built-in completion for dbt-core commands and flags
+#          OR clap_complete (via `dbt completions zsh`) for dbt-fusion — cached
+#          by binary mtime so it only regenerates when the binary changes
+#       3. Enhancing with manifest.json parsing for intelligent model/selector
+#          completions for both dbt-core and dbt-fusion
+#       4. Finding the root of the repo (identified by dbt_project.yml)
+#       5. Extracting valid model selectors from target/manifest.json for:
 #           -m / --model[s]
 #           -s / --select
 #           --exclude
@@ -246,43 +250,73 @@ _dbt_list_selectors() {
 }
 
 
-# Main function
-# Uses Click-generated completions and enhances with manifest-based model/selector completions
-_dbt() {
+# Detect whether the dbt binary is dbt-fusion or dbt-core.
+# Result is cached (keyed by binary path + mtime) to avoid running --help on every tab press.
+_dbt_detect_type() {
+    local bin_path
+    bin_path=$(command -v dbt) || return
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}"
+    local type_cache="$cache_dir/dbt_binary_type"
+    local key_cache="$cache_dir/dbt_binary_key"
+    local current_key="${bin_path}:$(stat -f %m "$bin_path" 2>/dev/null)"
+
+    if [[ -f "$type_cache" ]] && [[ "$(cat "$key_cache" 2>/dev/null)" == "$current_key" ]]; then
+        cat "$type_cache"
+        return
+    fi
+
+    local first_line
+    first_line=$(dbt --help 2>/dev/null | head -1)
+
+    local type="core"
+    if [[ "$first_line" == *"dbt-fusion"* ]]; then
+        type="fusion"
+    fi
+
+    mkdir -p "$cache_dir"
+    printf '%s' "$type" > "$type_cache"
+    printf '%s' "$current_key" > "$key_cache"
+    printf '%s' "$type"
+}
+
+
+# For dbt-fusion: source the clap_complete-generated zsh script (cached by binary mtime),
+# then delegate to the _dbt function it defines.
+_dbt_fusion_complete() {
+    local bin_path
+    bin_path=$(command -v dbt) || return 1
+
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}"
+    local script_cache="$cache_dir/dbt_fusion_completions.zsh"
+    local key_cache="$cache_dir/dbt_fusion_completions.key"
+    local current_key="${bin_path}:$(stat -f %m "$bin_path" 2>/dev/null)"
+
+    if [[ ! -f "$script_cache" ]] || [[ "$(cat "$key_cache" 2>/dev/null)" != "$current_key" ]]; then
+        mkdir -p "$cache_dir"
+        dbt completions zsh > "$script_cache" 2>/dev/null
+        printf '%s' "$current_key" > "$key_cache"
+    fi
+
+    # Source the clap-generated script; it redefines _dbt with clap's completion logic.
+    # Rename it to _dbt_clap so it doesn't clobber this function, then call it.
+    local script_content
+    script_content=$(sed 's/^_dbt()/_dbt_clap()/' "$script_cache")
+    eval "$script_content"
+    _dbt_clap "$@"
+}
+
+
+# For dbt-core: Click runtime completion.
+# Note: spawns a Python process per tab press, so inherently slower than dbt-fusion.
+_dbt_core_complete() {
     local ret=1
-
-    # Only continue if dbt can be found
-    if ! command -v dbt &> /dev/null; then
-        return 1
-    fi
-
-    # Check if we should use model/selector completions based on previous word
-    local prev_word=""
-    if (( CURRENT > 1 )); then
-        prev_word="${words[CURRENT-1]}"
-    fi
-
-    # If we're completing after a model/selector flag, use custom manifest-based completions
-    case "$prev_word" in
-        -s|--select|-m|--model|--models|--exclude)
-            _dbt_list_models
-            return $?
-            ;;
-        --selector)
-            _dbt_list_selectors
-            return $?
-            ;;
-    esac
-
-    # Otherwise, use Click-generated completions
     local IFS=$'\n'
     local response
 
-    # Call Click completion - note: COMP_CWORD in Click is 0-indexed for the position we're completing
+    # COMP_CWORD in Click is 0-indexed for the position we're completing
     response=$(env COMP_WORDS="${words[*]}" COMP_CWORD=$((CURRENT - 1)) _DBT_COMPLETE=zsh_complete dbt 2>/dev/null)
 
-    # If we got a response, process it
-    # Click's zsh completion returns 3 lines per item: type, value, description
     if [[ -n "$response" ]]; then
         local lines=("${(@f)response}")
         local i=1
@@ -309,7 +343,6 @@ _dbt() {
             i=$((i + 3))
         done
 
-        # Add all plain completions with descriptions
         if (( ${#descriptions[@]} > 0 )); then
             _describe 'dbt commands' descriptions
         elif (( ${#completions[@]} > 0 )); then
@@ -318,6 +351,45 @@ _dbt() {
     fi
 
     return ret
+}
+
+
+# Main function
+# Auto-detects dbt-core vs dbt-fusion and routes to the appropriate completion backend.
+# Manifest-based model/selector completions are applied for both.
+_dbt() {
+    local ret=1
+
+    if ! command -v dbt &> /dev/null; then
+        return 1
+    fi
+
+    # Manifest-based model/selector completions apply regardless of binary type
+    local prev_word=""
+    if (( CURRENT > 1 )); then
+        prev_word="${words[CURRENT-1]}"
+    fi
+
+    case "$prev_word" in
+        -s|--select|-m|--model|--models|--exclude)
+            _dbt_list_models
+            return $?
+            ;;
+        --selector)
+            _dbt_list_selectors
+            return $?
+            ;;
+    esac
+
+    local dbt_type
+    dbt_type=$(_dbt_detect_type)
+
+    if [[ "$dbt_type" == "fusion" ]]; then
+        _dbt_fusion_complete "$@"
+    else
+        _dbt_core_complete "$@"
+    fi
+    return $?
 }
 
 _dbt

@@ -111,7 +111,7 @@ except Exception as e:
 EOF
 )
 
-cat "$manifest_path" | python -c "$prog" $prefix
+cat "$manifest_path" | python3 -c "$prog" $prefix
 }
 
 # Iterate backwards in the arg list from the index

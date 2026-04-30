@@ -5,10 +5,10 @@
 
 This script adds autocompletion to the [dbt](https://www.getdbt.com/) CLI. Once installed, users can tab-complete model, tag, source, and package selectors to node selection flags like `--select` and `--exclude`. Need a refresher on resource selection? Check out [the docs](https://docs.getdbt.com/reference/node-selection/syntax).
 
-The zsh script (`_dbt`) supports both **dbt Core** and **Fusion**, including the `dbtf` alias created by the Fusion installer. It auto-detects which binary is on your `$PATH` and uses the appropriate completion backend — no configuration needed:
+The zsh (`_dbt`) and fish (`dbt.fish`) scripts support both **dbt Core** and **Fusion**, including the `dbtf` alias created by the Fusion installer. They auto-detect which binary is on your `$PATH` and use the appropriate completion backend — no configuration needed:
 
 - **dbt Core**: uses Click's built-in runtime completion
-- **Fusion** (`dbt` and `dbtf`): uses `dbt completions zsh` (clap_complete), cached by binary mtime for near-instant completions
+- **Fusion** (`dbt` and `dbtf`): uses `dbt completions zsh/fish` (clap_complete), cached by binary mtime for near-instant completions
 
 Model and selector completions from `manifest.json` work the same way for both.
 
@@ -68,6 +68,18 @@ And you may need to rebuild the zsh completion cache by running this in your ter
 rm -f ~/.zcompdump; compinit
 ```
 In many Linux distributions, the `zsh` package includes `/usr/local/share/zsh/site-functions` in its `fpath`, so simply copying `_dbt` in that directory should work.
+
+### Installation (fish)
+
+Copy `dbt.fish` to your fish completions directory:
+
+```
+curl https://raw.githubusercontent.com/dbt-labs/dbt-completion.bash/master/dbt.fish > ~/.config/fish/completions/dbt.fish
+```
+
+The script auto-detects dbt Core vs Fusion and caches the appropriate completion script by binary mtime. It covers both `dbt` and the `dbtf` alias created by the Fusion installer. Model and selector completions from `manifest.json` work for both.
+
+Restart fish or run `source ~/.config/fish/completions/dbt.fish` to pick it up immediately.
 
 ### Bash Completion
 

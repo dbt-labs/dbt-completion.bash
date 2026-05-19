@@ -1,5 +1,8 @@
 #compdef dbt dbtf
 
+# Enable zsh's native completion cache for all dbt completions.
+zstyle ':completion:*:complete:dbt:*' use-cache yes
+
 # OVERVIEW
 #   Adds autocompletion to dbt CLI by:
 #       1. Auto-detecting whether dbt is dbt-core (Click) or dbt-fusion (clap)
@@ -21,19 +24,17 @@
 #       Brand new models/sources/tags/packages will not be displayed in the tab
 #       complete menu until they are compiled and appear in the manifest.
 #
-#
 # CREDITS
 #   Leveraging a lot of logic from dbt-completion.bash:
 #   https://github.com/fishtown-analytics/dbt-completion.bash/blob/master/dbt-completion.bash
 #
-#  Inspired by zsh-completions
-#  https://github.com/zsh-users/zsh-completions
-#  and particularly https://github.com/zsh-users/zsh-completions/blob/40c6c768eabfa49d54a149149f338e23ee6dd83b/src/_ufw
+#   Inspired by zsh-completions
+#   https://github.com/zsh-users/zsh-completions
 
 
+# ─── manifest parsing ────────────────────────────────────────────────────────
 
-# Inline a python script so we can deploy this as a single file
-# the idea of doing this in bash natively is... daunting
+# Inline a python script so we can deploy this as a single file.
 _parse_manifest() {
 manifest_path=$1
 prefix=$2
@@ -163,140 +164,139 @@ cat "$manifest_path" | python3 -c "$prog"
 }
 
 
-# Check if DBT_PROJECT_DIR is set and not empty
-# Otherwise, walk up the filesystem until we find a dbt_project.yml file,
-# then return the path which contains it (if found)
+# Walk up the filesystem to find the dbt project root (directory containing
+# dbt_project.yml). Respects $DBT_PROJECT_DIR if set.
 _get_project_root() {
-  if [ -n "$DBT_PROJECT_DIR" ]; then
-    echo "$DBT_PROJECT_DIR" && return
-  fi
+    if [[ -n "${DBT_PROJECT_DIR-}" ]]; then
+        echo "$DBT_PROJECT_DIR" && return
+    fi
 
-  slashes=${PWD//[^\/]/}
-  directory="$PWD"
-  for (( n=${#slashes}; n>0; --n ))
-  do
-    test -e "$directory/dbt_project.yml" && echo "$directory" && return
-    directory="$directory/.."
-  done
+    local slashes="${PWD//[^\/]/}"
+    local directory="$PWD"
+    for (( n=${#slashes}; n>0; --n )); do
+        test -e "$directory/dbt_project.yml" && echo "$directory" && return
+        directory="$directory/.."
+    done
 }
 
 
-# Lists the difference models, extracted from manifest.json
-_dbt_list_models() {
-
+# Resolves the manifest path from $DBT_MANIFEST_PATH or the project root.
+# Prints the path to stdout; returns 1 if the file does not exist.
+_dbt_manifest_path() {
+    local project_dir
     project_dir="$(_get_project_root)"
+    local path="${DBT_MANIFEST_PATH:-${project_dir}/target/manifest.json}"
+    [[ -f "$path" ]] || return 1
+    printf '%s' "$path"
+}
 
-    # Attempt to fetch the manifest path from the environment variable
-    if [ -z "$DBT_MANIFEST_PATH" ] ; then
-        manifest_path="${project_dir}/target/manifest.json"
+
+# Lists model selectors extracted from manifest.json.
+# Cache key = path_hash + mtime: mtime alone would collide across projects that
+# happened to compile their manifest at the same second.
+_dbt_list_models() {
+    local manifest_path
+    manifest_path=$(_dbt_manifest_path) || return
+
+    local manifest_mtime path_hash
+    manifest_mtime=$(stat -f %m "$manifest_path" 2>/dev/null || stat -c %Y "$manifest_path" 2>/dev/null)
+    path_hash=$(printf '%s' "$manifest_path" | cksum); path_hash="${path_hash%% *}"
+
+    typeset -ga _dbt_models_cache
+    if ! _retrieve_cache "dbt_models_${path_hash}_${manifest_mtime}"; then
+        _dbt_models_cache=( ${=${(f)"$(_parse_manifest "$manifest_path" "")"}} )
+        _store_cache "dbt_models_${path_hash}_${manifest_mtime}" _dbt_models_cache
+    fi
+
+    # $PREFIX is set by compset after stripping a --flag= prefix; fall back to
+    # the raw current word so + / @ pass-through prefixes work in both styles.
+    local _pfx="${PREFIX-${words[-1]}}"
+    local first_letter="${_pfx:0:1}"
+    local -a models_list
+    if [[ "$first_letter" == "+" || "$first_letter" == "@" ]]; then
+        models_list=( "${_dbt_models_cache[@]/#/${first_letter}}" )
     else
-        manifest_path="$DBT_MANIFEST_PATH"
-    fi
-
-    if [ ! -f "$manifest_path" ] ; then
-        return
-    fi
-
-    # Cache the base model list in target/.dbt_completion_cache.txt (keyed by
-    # manifest mtime) so Python is only invoked when the manifest changes.
-    local cache_file="${manifest_path:h}/.dbt_completion_cache.txt"
-    local key_file="${manifest_path:h}/.dbt_completion_cache.key"
-    local manifest_key
-    manifest_key=$(stat -f %m "$manifest_path" 2>/dev/null || stat -c %Y "$manifest_path" 2>/dev/null)
-
-    if [[ ! -f "$cache_file" ]] || [[ "$(cat "$key_file" 2>/dev/null)" != "$manifest_key" ]]; then
-        _parse_manifest "$manifest_path" "" > "$cache_file"
-        printf '%s' "$manifest_key" > "$key_file"
-    fi
-
-    local first_letter
-    first_letter=${words[-1]:0:1}
-
-    local models_list
-    if [ "$first_letter" = "+" ] || [ "$first_letter" = "@" ]; then
-        models_list=( $(sed "s/^/${first_letter}/" "$cache_file") )
-    else
-        models_list=( $(cat "$cache_file") )
+        models_list=( "${_dbt_models_cache[@]}" )
     fi
     _values -s , 'models' $models_list
 }
 
 
-# Lists the different selectors, extracted from manifest.json
+# Lists YAML selectors extracted from manifest.json.
+# Same path_hash + mtime cache key as _dbt_list_models to avoid cross-project
+# collisions.
 _dbt_list_selectors() {
+    local manifest_path
+    manifest_path=$(_dbt_manifest_path) || return
 
-    project_dir="$(_get_project_root)"
+    local manifest_mtime path_hash
+    manifest_mtime=$(stat -f %m "$manifest_path" 2>/dev/null || stat -c %Y "$manifest_path" 2>/dev/null)
+    path_hash=$(printf '%s' "$manifest_path" | cksum); path_hash="${path_hash%% *}"
 
-    # Attempt to fetch the manifest path from the environment variable
-    if [ -z "$DBT_MANIFEST_PATH" ] ; then
-        manifest_path="${project_dir}/target/manifest.json"
-    else
-        manifest_path="$DBT_MANIFEST_PATH"
+    typeset -ga _dbt_selectors_cache
+    if ! _retrieve_cache "dbt_selectors_${path_hash}_${manifest_mtime}"; then
+        _dbt_selectors_cache=( ${=${(f)"$(_parse_selectors "$manifest_path")"}} )
+        _store_cache "dbt_selectors_${path_hash}_${manifest_mtime}" _dbt_selectors_cache
     fi
 
-    if [ ! -f "$manifest_path" ] ; then
-        return
-    fi
-
-    local cache_file="${manifest_path:h}/.dbt_completion_cache_selectors.txt"
-    local key_file="${manifest_path:h}/.dbt_completion_cache_selectors.key"
-    local manifest_key
-    manifest_key=$(stat -f %m "$manifest_path" 2>/dev/null || stat -c %Y "$manifest_path" 2>/dev/null)
-
-    if [[ ! -f "$cache_file" ]] || [[ "$(cat "$key_file" 2>/dev/null)" != "$manifest_key" ]]; then
-        _parse_selectors "$manifest_path" > "$cache_file"
-        printf '%s' "$manifest_key" > "$key_file"
-    fi
-
-    local selectors_list=( $(cat "$cache_file") )
-    if [ "$selectors_list" != "" ]; then
-        _values -s , 'selectors' $selectors_list
-    fi
+    (( ${#_dbt_selectors_cache[@]} > 0 )) && _values -s , 'selectors' "${_dbt_selectors_cache[@]}"
 }
 
 
-# Detect whether the dbt binary is dbt-fusion or dbt-core.
-# Result is cached (keyed by binary path + mtime) to avoid running --help on every tab press.
-_dbt_detect_type() {
+# ─── binary info ─────────────────────────────────────────────────────────────
+
+# Resolves the dbt binary path and mtime.
+# reply=(bin_path bin_mtime). Returns 1 if dbt is not in PATH.
+_dbt_bin_info() {
     local bin_path
-    bin_path=$(command -v dbt) || return
-
-    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}"
-    local type_cache="$cache_dir/dbt_binary_type"
-    local key_cache="$cache_dir/dbt_binary_key"
-    local current_key="${bin_path}:$(stat -f %m "$bin_path" 2>/dev/null)"
-
-    if [[ -f "$type_cache" ]] && [[ "$(cat "$key_cache" 2>/dev/null)" == "$current_key" ]]; then
-        cat "$type_cache"
-        return
-    fi
-
-    local first_line
-    first_line=$(dbt --help 2>/dev/null | head -1)
-
-    local type="core"
-    if [[ "$first_line" == *"dbt-fusion"* ]]; then
-        type="fusion"
-    fi
-
-    mkdir -p "$cache_dir"
-    printf '%s' "$type" > "$type_cache"
-    printf '%s' "$current_key" > "$key_cache"
-    printf '%s' "$type"
+    bin_path=$(command -v dbt) || return 1
+    local bin_mtime
+    bin_mtime=$(stat -f %m "$bin_path" 2>/dev/null || stat -c %Y "$bin_path" 2>/dev/null)
+    reply=("$bin_path" "$bin_mtime")
 }
 
 
-# For dbt-fusion: source the clap_complete-generated zsh script (cached by binary mtime),
-# then delegate to the _dbt function it defines.
+# ─── type detection ──────────────────────────────────────────────────────────
+
+# Detects whether dbt is dbt-core (click) or dbt-fusion (clap).
+# Prints "core" or "fusion". Cached by binary path + mtime.
+_dbt_detect_type() {
+    _dbt_bin_info || return 1
+    local bin_path="${reply[1]}" bin_mtime="${reply[2]}"
+
+    local path_hash
+    path_hash=$(printf '%s' "$bin_path" | cksum)
+    path_hash="${path_hash%% *}"
+
+    typeset -g _dbt_binary_type_cache
+    if ! _retrieve_cache "dbt_binary_type_${path_hash}_${bin_mtime}"; then
+        local first_line
+        first_line=$(dbt --help 2>/dev/null | head -1)
+        _dbt_binary_type_cache="core"
+        [[ "$first_line" == *"dbt-fusion"* ]] && _dbt_binary_type_cache="fusion"
+        _store_cache "dbt_binary_type_${path_hash}_${bin_mtime}" _dbt_binary_type_cache
+    fi
+
+    printf '%s' "$_dbt_binary_type_cache"
+}
+
+
+# ─── dbt-fusion ──────────────────────────────────────────────────────────────
+
+# Sources the clap_complete-generated zsh script (cached by binary mtime) and
+# delegates to the _dbt_clap function it defines.
 # Accepts an optional explicit binary path (used when completing the dbtf alias).
 _dbt_fusion_complete() {
     local bin_path="${1:-$(command -v dbt)}"
     [[ -z "$bin_path" ]] && return 1
 
+    local bin_mtime
+    bin_mtime=$(stat -f %m "$bin_path" 2>/dev/null || stat -c %Y "$bin_path" 2>/dev/null)
+
     local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}"
     local script_cache="$cache_dir/dbt_fusion_completions.zsh"
     local key_cache="$cache_dir/dbt_fusion_completions.key"
-    local current_key="${bin_path}:$(stat -f %m "$bin_path" 2>/dev/null)"
+    local current_key="${bin_path}:${bin_mtime}"
 
     if [[ ! -f "$script_cache" ]] || [[ "$(cat "$key_cache" 2>/dev/null)" != "$current_key" ]]; then
         mkdir -p "$cache_dir"
@@ -304,8 +304,8 @@ _dbt_fusion_complete() {
         printf '%s' "$current_key" > "$key_cache"
     fi
 
-    # Source the clap-generated script; it redefines _dbt with clap's completion logic.
-    # Rename it to _dbt_clap so it doesn't clobber this function, then call it.
+    # Source the clap-generated script; rename its _dbt() to _dbt_clap() so it
+    # doesn't clobber this completion function, then call it.
     local script_content
     script_content=$(sed 's/^_dbt()/_dbt_clap()/' "$script_cache")
     eval "$script_content"
@@ -313,64 +313,244 @@ _dbt_fusion_complete() {
 }
 
 
-# For dbt-core: Click runtime completion.
-# Note: spawns a Python process per tab press, so inherently slower than dbt-fusion.
-_dbt_core_complete() {
-    local ret=1
-    local IFS=$'\n'
-    local response
+# ─── dbt-core (click) ────────────────────────────────────────────────────────
+#
+# Completion for dbt-core is cached at the level of the normalised completion
+# context, not the full command line. Prior flags are stripped from COMP_WORDS
+# before calling click because click returns the same flag list regardless of
+# which flags have already been given. This collapses many real command lines
+# onto a small set of cache entries:
+#
+#   Flag-name completion  (current word starts with "-"):
+#     Normalised COMP_WORDS = "<subcommand> -"
+#     e.g. "dbt run --<tab>" and "dbt run --project-dir /foo --<tab>" both
+#     normalise to "dbt run -", sharing one cache entry. The real partial is
+#     filtered locally after the cache is read.
+#
+#   Flag-value completion (prev word is a flag, e.g. "--log-format te<tab>"):
+#     Normalised COMP_WORDS = "<subcommand> <flag> <partial>"
+#     The flag name is included so click returns the right choices.
+#
+#   Subcommand / positional completion:
+#     Normalised COMP_WORDS = "<subcommand> <partial>"
 
-    # COMP_CWORD in Click is 0-indexed for the position we're completing
-    response=$(env COMP_WORDS="${words[*]}" COMP_CWORD=$((CURRENT - 1)) _DBT_COMPLETE=zsh_complete dbt 2>/dev/null)
 
-    if [[ -n "$response" ]]; then
-        local lines=("${(@f)response}")
-        local i=1
-        local -a completions descriptions
+# Extracts the subcommand path (non-flag words) from $words[1..CURRENT-1].
+# reply=(sub_context sub_cword has_global_flags)
+#
+# has_global_flags is 1 when words[2] (the word immediately after "dbt") starts
+# with "-", meaning the user typed at least one global flag before the subcommand,
+# e.g. "dbt --profiles-dir /p run --<tab>". The caller uses this to decide whether
+# to normalise the context (safe when no global flags) or pass the full word
+# sequence to Click (necessary when global flags are present, because we cannot
+# determine which flags take a value without running dbt).
+_dbt_core_subcommand_path() {
+    local -a sub_words
+    local w
+    for w in "${words[1,CURRENT-1][@]}"; do
+        [[ "$w" == -* ]] && break
+        sub_words+=("$w")
+    done
+    # words[2] is a reliable sentinel: if CURRENT > 2 and it starts with -,
+    # a global flag precedes the subcommand. We check CURRENT > 2 to avoid
+    # treating the current (still-being-typed) word as a committed global flag.
+    local has_global_flags=0
+    (( CURRENT > 2 )) && [[ "${words[2]-}" == -* ]] && has_global_flags=1
+    reply=("${(j: :)sub_words}" "${#sub_words}" "$has_global_flags")
+}
 
-        while (( i <= ${#lines[@]} )); do
-            local comp_type="${lines[i]}"
-            local comp_value="${lines[i+1]}"
-            local comp_desc="${lines[i+2]}"
 
-            if [[ $comp_type == 'dir' ]]; then
-                _files -/ && ret=0
-            elif [[ $comp_type == 'file' ]]; then
-                _files && ret=0
-            elif [[ $comp_type == 'plain' ]]; then
-                if [[ -n "$comp_desc" ]]; then
-                    descriptions+=("$comp_value:$comp_desc")
-                else
-                    completions+=("$comp_value")
-                fi
-                ret=0
-            fi
+# Builds the normalised COMP_WORDS / COMP_CWORD to pass to click, plus an
+# optional local filter word (used when the partial was normalised away).
+# Args: current_word prev_word sub_context sub_cword
+# reply=(comp_words_str comp_cword filter_word)
+_dbt_core_build_comp_context() {
+    local current_word="$1" prev_word="$2" sub_context="$3" sub_cword="$4"
+    local comp_words_str comp_cword filter_word=""
 
-            i=$((i + 3))
-        done
-
-        if (( ${#descriptions[@]} > 0 )); then
-            _describe 'dbt commands' descriptions
-        elif (( ${#completions[@]} > 0 )); then
-            compadd -U -a completions
-        fi
+    if [[ "$prev_word" == -* ]]; then
+        # Flag-value: include the flag so click returns the right choices.
+        comp_words_str="${sub_context} ${prev_word} ${current_word}"
+        comp_cword=$(( sub_cword + 1 ))
+    elif [[ "$current_word" == -* ]]; then
+        # Flag-name: normalise to "-" so all flags share one cache entry.
+        comp_words_str="${sub_context} -"
+        comp_cword=${sub_cword}
+        filter_word="$current_word"
+    else
+        # Subcommand or positional argument.
+        comp_words_str="${sub_context} ${current_word}"
+        comp_cword=${sub_cword}
     fi
 
+    reply=("$comp_words_str" "$comp_cword" "$filter_word")
+}
+
+
+# Invokes click to fetch completions for the given normalised context.
+# Uses zsh's native _retrieve_cache / _store_cache keyed by binary mtime +
+# context hash. Sets the global variable $_dbt_response.
+# Args: bin_mtime comp_words_str comp_cword
+_dbt_core_fetch_completions() {
+    local bin_mtime="$1" comp_words_str="$2" comp_cword="$3"
+
+    local ctx_hash
+    ctx_hash=$(printf '%s' "$comp_words_str" | cksum)
+    ctx_hash="${ctx_hash%% *}"
+
+    typeset -g _dbt_response
+    if ! _retrieve_cache "dbt_click_${bin_mtime}_${ctx_hash}"; then
+        _dbt_response=$(env COMP_WORDS="$comp_words_str" COMP_CWORD="$comp_cword" \
+            _DBT_COMPLETE=zsh_complete dbt 2>/dev/null)
+        _store_cache "dbt_click_${bin_mtime}_${ctx_hash}" _dbt_response
+    fi
+}
+
+
+# Parses click's line-triplet response (type / value / description) and
+# presents completions to zsh. Applies filter_word as a prefix filter when set
+# (used for flag-name completions that were normalised to "-").
+#
+# Click occasionally emits multi-line descriptions (e.g. --warn-error-options),
+# which breaks a fixed stride-3 loop. Instead, we scan forward to the next type
+# marker so multi-line descriptions are automatically consumed.
+#
+# Args: response filter_word
+_dbt_core_present_completions() {
+    local response="$1" filter_word="$2"
+    [[ -z "$response" ]] && return 1
+
+    local ret=1
+    local -a lines
+    lines=("${(@f)response}")
+    local n=${#lines[@]} i=1
+    local -a completions descriptions
+
+    while (( i <= n )); do
+        local comp_type="${lines[i]}"
+
+        # Skip lines that are not a known type marker (handles mid-description lines
+        # after a multi-line description shifted the alignment).
+        if [[ "$comp_type" != "plain" && "$comp_type" != "file" && "$comp_type" != "dir" ]]; then
+            i=$(( i + 1 ))
+            continue
+        fi
+
+        # Guard against a truncated last triplet (e.g. trailing newlines stripped
+        # by command substitution).
+        local comp_value="" comp_desc=""
+        (( i + 1 <= n )) && comp_value="${lines[i+1]}"
+        (( i + 2 <= n )) && comp_desc="${lines[i+2]}"
+
+        # Advance to the next type marker, consuming any extra description lines.
+        local next_i=$(( i + 3 ))
+        while (( next_i <= n )) && \
+              [[ "${lines[next_i]}" != "plain" && "${lines[next_i]}" != "file" && "${lines[next_i]}" != "dir" ]]; do
+            next_i=$(( next_i + 1 ))
+        done
+
+        case "$comp_type" in
+            dir)  _files -/ && ret=0 ;;
+            file) _files    && ret=0 ;;
+            plain)
+                if [[ -z "$filter_word" ]] || [[ "$comp_value" == ${filter_word}* ]]; then
+                    if [[ -n "$comp_desc" ]]; then
+                        descriptions+=("${comp_value}:${comp_desc}")
+                    else
+                        completions+=("$comp_value")
+                    fi
+                    ret=0
+                fi
+                ;;
+        esac
+
+        i=$next_i
+    done
+
+    (( ${#descriptions[@]} > 0 )) && _describe 'dbt completions' descriptions
+    (( ${#completions[@]} > 0 )) && compadd -U -a completions
     return ret
 }
 
 
-# Main function
-# Auto-detects dbt-core vs dbt-fusion and routes to the appropriate completion backend.
-# For the dbtf alias (always Fusion), the binary path is resolved from the alias value.
-# Manifest-based model/selector completions are applied for both.
-_dbt() {
-    local ret=1
+# Orchestrates dbt-core (click) tab completion.
+#
+# Two context-building paths depending on whether global flags precede the subcommand:
+#
+#   Normal path (no global flags before subcommand, e.g. "dbt run --<tab>"):
+#     Strip prior flags from COMP_WORDS so completions for the same subcommand
+#     share a single cache entry regardless of which flags have already been given.
+#
+#   Global-flag path (e.g. "dbt --profiles-dir /p run --<tab>"):
+#     We cannot safely strip global flags because we don't know which take a value.
+#     Pass the full word sequence to Click verbatim. One cache entry per unique
+#     global-flag combination — acceptable because that combination is stable within
+#     a project session.
+_dbt_core_complete() {
+    _dbt_bin_info || return 1
+    local bin_mtime="${reply[2]}"
 
-    # Manifest-based model/selector completions apply regardless of binary type
+    local current_word="${words[CURRENT]}"
     local prev_word=""
-    if (( CURRENT > 1 )); then
-        prev_word="${words[CURRENT-1]}"
+    (( CURRENT > 1 )) && prev_word="${words[CURRENT-1]}"
+
+    _dbt_core_subcommand_path
+    local sub_context="${reply[1]}" sub_cword="${reply[2]}" has_global_flags="${reply[3]}"
+
+    local comp_words_str comp_cword filter_word
+    if (( has_global_flags )); then
+        # Full-context path: preserve every committed word so Click parses
+        # global flags correctly. Still normalise the current word when it is a
+        # flag name so all flag-name completions for this global-flag prefix
+        # share one cache entry.
+        if [[ "$current_word" == -* ]]; then
+            comp_words_str="${(j: :)words[1,CURRENT-1]} -"
+            filter_word="$current_word"
+        else
+            comp_words_str="${(j: :)words[1,CURRENT]}"
+            filter_word=""
+        fi
+        comp_cword=$(( CURRENT - 1 ))
+    else
+        # Common path: normalise away already-provided flags so all completions
+        # for the same subcommand share one cache entry.
+        _dbt_core_build_comp_context "$current_word" "$prev_word" "$sub_context" "$sub_cword"
+        comp_words_str="${reply[1]}" comp_cword="${reply[2]}" filter_word="${reply[3]}"
+    fi
+
+    _dbt_core_fetch_completions "$bin_mtime" "$comp_words_str" "$comp_cword"
+    _dbt_core_present_completions "$_dbt_response" "$filter_word"
+}
+
+
+# ─── main ─────────────────────────────────────────────────────────────────────
+
+# Auto-detects dbt-core vs dbt-fusion and routes to the appropriate completion
+# backend. Manifest-based model/selector completions are applied for both.
+# For the dbtf alias (always Fusion), the binary is resolved from the alias.
+_dbt() {
+    # Ensure the cache directory exists so _store_cache/_retrieve_cache work.
+    local _dbt_cache_dir="${ZDOTDIR:-$HOME}/.zcompcache"
+    [[ -d "$_dbt_cache_dir" ]] || mkdir -p "$_dbt_cache_dir"
+
+    local current_word="${words[CURRENT]}"
+    local prev_word=""
+    (( CURRENT > 1 )) && prev_word="${words[CURRENT-1]}"
+
+    # --flag=value style (clap/Fusion and Click both accept this form)
+    if [[ "$current_word" == *=* ]]; then
+        case "${current_word%%=*}" in
+            -s|--select|-m|--model|--models|--exclude)
+                compset -P '*='
+                _dbt_list_models
+                return $?
+                ;;
+            --selector)
+                compset -P '*='
+                _dbt_list_selectors
+                return $?
+                ;;
+        esac
     fi
 
     case "$prev_word" in
@@ -384,16 +564,12 @@ _dbt() {
             ;;
     esac
 
-    # dbtf is always Fusion; resolve the binary from the alias value directly
     if [[ "$service" == "dbtf" ]]; then
-        local dbtf_bin="${aliases[dbtf]}"
-        _dbt_fusion_complete "$dbtf_bin"
+        _dbt_fusion_complete "${aliases[dbtf]}"
         return $?
     fi
 
-    if ! command -v dbt &> /dev/null; then
-        return 1
-    fi
+    command -v dbt &>/dev/null || return 1
 
     local dbt_type
     dbt_type=$(_dbt_detect_type)
@@ -403,7 +579,6 @@ _dbt() {
     else
         _dbt_core_complete
     fi
-    return $?
 }
 
 _dbt

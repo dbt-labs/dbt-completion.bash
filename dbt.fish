@@ -73,6 +73,10 @@ try:
     for node in manifest.get("nodes", {}).values():
         if node.get("resource_type") in ("model", "seed"):
             results.add(node["name"])
+    # Singular tests
+    for node in manifest.get("nodes", {}).values():
+        if node.get("resource_type") == "test" and "test_metadata" not in node:
+            results.add(node["name"])
     for node in manifest.get("sources", {}).values():
         results.add("source:" + node["source_name"])
         results.add("source:" + node["source_name"] + "." + node["name"])

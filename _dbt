@@ -61,6 +61,12 @@ try:
         if node['resource_type'] in ['model', 'seed']
     )
 
+    singular_tests = set(
+        "{}{}".format(prefix, node['name'])
+        for node in manifest['nodes'].values()
+        if node['resource_type'] == 'test' and 'test_metadata' not in node
+    )
+
     tags = set(
         "{}tag:{}".format(prefix, tag)
         for node in manifest['nodes'].values()
@@ -114,7 +120,7 @@ try:
 
     selectors = [
         selector.replace(':', r'\:')
-        for selector in (models | tags | sources | exposures | metrics | fqns | hard_coded)
+        for selector in (models | singular_tests | tags | sources | exposures | metrics | fqns | hard_coded)
         if selector != ''
     ]
 
